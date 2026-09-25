@@ -1,0 +1,67 @@
+{
+    "name": "vuthaihoc/laravel-db-portable",
+    "description": "Portable query builder helpers for JSON numbers, NULLS LAST and JSON counters across PostgreSQL/CockroachDB, MySQL/MariaDB/MatrixOne and SQLite, plus scan, audit and copy tools for switching database drivers",
+    "keywords": ["laravel", "database", "portable", "json", "cockroachdb", "matrixone", "mysql", "postgresql", "migration"],
+    "homepage": "https://github.com/vuthaihoc/laravel-db-portable",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "vuthaihoc",
+            "email": "vuthaihoc.ttud@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^12.0 || ^13.0",
+        "illuminate/database": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.17",
+        "orchestra/testbench": "^10.0",
+        "phpunit/phpunit": "^11.5",
+        "vuthaihoc/cockroachdb-laravel": "@dev",
+        "vuthaihoc/laravel-matrixone": "@dev"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../laravel-matrixone",
+            "options": { "symlink": true }
+        },
+        {
+            "type": "path",
+            "url": "../crdb2025",
+            "options": { "symlink": true }
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "DbPortable\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "DbPortable\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "DbPortable\\DbPortableServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "phpunit --colors",
+        "phpstan": "phpstan analyse --memory-limit=-1",
+        "cs": "pint --test",
+        "cs:fix": "pint"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

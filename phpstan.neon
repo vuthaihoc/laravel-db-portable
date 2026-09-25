@@ -1,0 +1,12 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+    ignoreErrors:
+        # Query builder macros are closures bound to the builder at runtime.
+        -
+            identifier: method.notFound
+            message: '#Illuminate\\Database\\(Query|Eloquent)\\Builder.*::(whereJsonNumber|incrementJson|sumJson|avgJson|minJson|maxJson)\(\)#'

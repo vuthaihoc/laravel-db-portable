@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+  bootstrap="vendor/autoload.php"
+  cacheDirectory=".phpunit.cache"
+  failOnRisky="true"
+  failOnWarning="true"
+>
+  <testsuites>
+    <testsuite name="Unit">
+      <directory>tests/Unit</directory>
+    </testsuite>
+    <testsuite name="Conformance">
+      <directory>tests/Conformance</directory>
+    </testsuite>
+  </testsuites>
+  <php>
+    <env name="MATRIXONE_HOST" value="127.0.0.1"/>
+    <env name="MATRIXONE_PORT" value="6001"/>
+    <env name="MATRIXONE_USERNAME" value="root"/>
+    <env name="MATRIXONE_PASSWORD" value="111"/>
+    <env name="CRDB_HOST" value="127.0.0.1"/>
+    <env name="CRDB_PORT" value="26258"/>
+    <env name="CRDB_USERNAME" value="root"/>
+  </php>
+  <source>
+    <include>
+      <directory>./src</directory>
+    </include>
+  </source>
+</phpunit>
