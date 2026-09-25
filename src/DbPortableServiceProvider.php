@@ -6,6 +6,7 @@ use DbPortable\Console\AuditCommand;
 use DbPortable\Console\CopyCommand;
 use DbPortable\Console\ScanCommand;
 use DbPortable\Dialects\Dialect;
+use DbPortable\Schema\SchemaMacros;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
@@ -19,6 +20,7 @@ class DbPortableServiceProvider extends ServiceProvider
     public function register(): void
     {
         static::registerQueryMacros();
+        SchemaMacros::register();
     }
 
     public function boot(): void

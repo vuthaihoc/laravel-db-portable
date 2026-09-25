@@ -83,6 +83,49 @@ $query->selectRaw('sum(' . Portable::on($query)->number('plan_data->amount')->ge
 Portable::on('crdb')->asText('tags');                                              // "tags"::text
 ```
 
+## Migrations
+
+Blueprint macros for schema features that differ between databases. When a database has no equivalent, the macro skips the feature and logs a warning. Set `config(['db-portable.strict' => true])` to throw instead.
+
+```php
+Schema::create('videos', function (Blueprint $table) {
+    $table->id();
+
+    // A JSON column with a default value (arrays and scalars are encoded as JSON)
+    $table->jsonWithDefault('tags', []);
+    $table->jsonWithDefault('settings', ['theme' => 'dark'], binary: true);   // jsonb on PostgreSQL
+
+    // A GIN index on a whole JSON column
+    $table->jsonb('meta')->nullable();
+    $table->jsonIndex('meta');
+
+    // Descending indexes
+    $table->timestamp('published_at')->nullable();
+    $table->descIndex('published_at');
+    $table->descIndex(['score' => 'desc', 'id' => 'asc'], 'videos_ranking');
+
+    // Driver-specific parts: a driver name (crdb, matrixone, mariadb...) wins over its family
+    // (pgsql, mysql, sqlite); several keys separated by commas; "default" otherwise.
+    $table->forDriver([
+        'pgsql' => fn (Blueprint $table) => $table->index('title', null, 'gin'),       // PostgreSQL, CockroachDB
+        'matrixone' => fn (Blueprint $table) => $table->fullText('title'),
+        'default' => fn (Blueprint $table) => $table->index('title'),
+    ]);
+});
+
+// Outside a blueprint, e.g. raw statements
+Schema::forDriver([
+    'pgsql' => fn () => DB::statement("create index files_meta_source on files ((meta->>'source'))"),
+    'default' => fn () => null,
+]);
+```
+
+| Macro | PostgreSQL / CockroachDB | MySQL / MariaDB | MatrixOne | SQLite |
+|-------|--------------------------|-----------------|-----------|--------|
+| `jsonWithDefault()` | `default '[]'` | `default ('[]')` | skipped: the column is nullable, set the default in the model's `$attributes` | `default '[]'` |
+| `jsonIndex()` | `using gin` (use `jsonb()` on PostgreSQL) | skipped | skipped | skipped |
+| `descIndex()` | `(col desc)` | `(col desc)` | accepted, built ascending | `(col desc)` |
+
 ## Switching databases
 
 A suggested workflow, e.g. from CockroachDB (`crdb`) to MatrixOne (`matrixone`):
