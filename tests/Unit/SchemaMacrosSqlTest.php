@@ -64,4 +64,47 @@ class SchemaMacrosSqlTest extends TestCase
 
         $this->sql(MySqlConnection::class, fn (Blueprint $table) => $table->descIndex(['score' => 'sideways']));
     }
+
+    public function test_portable_indexes_on_postgres(): void
+    {
+        $sql = $this->sql(PostgresConnection::class, function (Blueprint $table) {
+            $table->jsonKeyIndex('meta->source');
+            $table->coveringIndex('video_id', ['title', 'slug']);
+            $table->trigramIndex('word');
+            $table->partialIndex(['email'], 'deleted_at is null');
+        });
+
+        $this->assertContains('create index "items_meta_source_index" on "items" (("meta"->>\'source\'))', $sql);
+        $this->assertContains('create index "items_video_id_index" on "items" ("video_id") include ("title", "slug")', $sql);
+        $this->assertContains('create index "items_word_index_trigram" on "items" using gin ("word" gin_trgm_ops)', $sql);
+        $this->assertContains('create index "items_email_index_partial" on "items" ("email") where deleted_at is null', $sql);
+    }
+
+    public function test_portable_indexes_on_mysql(): void
+    {
+        $sql = implode(';', $this->sql(MySqlConnection::class, function (Blueprint $table) {
+            $table->jsonKeyIndex('meta->source');
+            $table->coveringIndex('video_id', ['title']);
+            $table->trigramIndex('word');
+            $table->partialIndex('email', 'deleted_at is null');
+        }));
+
+        $this->assertStringContainsString("alter table `items` add index `items_meta_source_index` ((cast(json_unquote(json_extract(`meta`, '$.\"source\"')) as char(255)) collate utf8mb4_bin))", $sql);
+        $this->assertStringContainsString('alter table `items` add index `items_video_id_index`(`video_id`)', $sql);
+        $this->assertStringContainsString('alter table `items` add fulltext `items_word_index_trigram` (`word`) with parser ngram', $sql);
+        $this->assertStringContainsString('alter table `items` add index `items_email_index_partial`(`email`)', $sql);
+        $this->assertStringNotContainsString('where', $sql);
+    }
+
+    public function test_mariadb_skips_json_key_indexes(): void
+    {
+        $sql = implode(';', $this->sql(MariaDbConnection::class, function (Blueprint $table) {
+            $table->jsonKeyIndex('meta->source');
+            $table->trigramIndex('word');
+        }));
+
+        $this->assertStringNotContainsString('meta', $sql);
+        $this->assertStringContainsString('add fulltext `items_word_index_trigram` (`word`)', $sql);
+        $this->assertStringNotContainsString('ngram', $sql);
+    }
 }

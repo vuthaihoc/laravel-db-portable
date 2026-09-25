@@ -9,6 +9,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use Illuminate\Database\Schema\ColumnDefinition;
 use Illuminate\Database\Schema\Grammars\Grammar;
+use Illuminate\Database\Schema\Grammars\Grammar as SchemaGrammar;
 use Illuminate\Database\Schema\IndexDefinition;
 use Illuminate\Support\Fluent;
 use InvalidArgumentException;
@@ -86,6 +87,47 @@ final class SchemaMacros
             ));
 
             return $this->rawIndex($expression, $name);
+        });
+
+        // Indexes compiled per database by IndexCompiler (see compilePortableIndex below).
+        $portableIndex = function (Blueprint $blueprint, string $kind, array $columns, string $suffix, ?string $name, array $attributes = []): Fluent {
+            $name ??= (fn () => $this->createIndexName('index', $columns))->call($blueprint).$suffix;
+
+            return (fn () => $this->addCommand('portableIndex', ['kind' => $kind, 'index' => $name, 'columns' => $columns] + $attributes))->call($blueprint);
+        };
+
+        // An index on a JSON key: jsonKeyIndex('meta->source').
+        Blueprint::macro('jsonKeyIndex', function (string $path, ?string $name = null) use ($portableIndex): Fluent {
+            /** @var Blueprint $this */
+            $columns = [str_replace('->', '_', $path)];
+
+            return $portableIndex($this, 'jsonKey', $columns, '', $name, ['path' => $path]);
+        });
+
+        // An index carrying extra columns: coveringIndex('video_id', ['title']).
+        Blueprint::macro('coveringIndex', function (array|string $columns, array|string $include, ?string $name = null) use ($portableIndex): Fluent {
+            /** @var Blueprint $this */
+            return $portableIndex($this, 'covering', (array) $columns, '', $name, ['include' => (array) $include]);
+        });
+
+        // Fuzzy search on a text column: trigramIndex('word').
+        Blueprint::macro('trigramIndex', function (string $column, ?string $name = null) use ($portableIndex): Fluent {
+            /** @var Blueprint $this */
+            return $portableIndex($this, 'trigram', [$column], '_trigram', $name);
+        });
+
+        // An index on some rows: partialIndex('email', 'deleted_at is null').
+        Blueprint::macro('partialIndex', function (array|string $columns, string $where, ?string $name = null) use ($portableIndex): Fluent {
+            /** @var Blueprint $this */
+            return $portableIndex($this, 'partial', (array) $columns, '_partial', $name, ['where' => $where]);
+        });
+
+        SchemaGrammar::macro('compilePortableIndex', function (Blueprint $blueprint, Fluent $command): string|array|null {
+            /** @var SchemaGrammar $this */
+            /** @var Connection $connection */
+            $connection = (fn () => $this->connection)->call($this);
+
+            return (new IndexCompiler($this, $connection))->compile($blueprint, $command);
         });
 
         // Run only the callback matching the connection:

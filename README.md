@@ -104,6 +104,12 @@ Schema::create('videos', function (Blueprint $table) {
     $table->descIndex('published_at');
     $table->descIndex(['score' => 'desc', 'id' => 'asc'], 'videos_ranking');
 
+    // An index on a JSON key, an index carrying extra columns, fuzzy search, an index on some rows
+    $table->jsonKeyIndex('meta->source');
+    $table->coveringIndex('video_id', ['title']);
+    $table->trigramIndex('title');                    // PostgreSQL needs `create extension pg_trgm`
+    $table->partialIndex('slug', 'deleted_at is null');
+
     // Driver-specific parts: a driver name (crdb, matrixone, mariadb...) wins over its family
     // (pgsql, mysql, sqlite); several keys separated by commas; "default" otherwise.
     $table->forDriver([
@@ -125,6 +131,12 @@ Schema::forDriver([
 | `jsonWithDefault()` | `default '[]'` | `default ('[]')` | skipped: the column is nullable, set the default in the model's `$attributes` | `default '[]'` |
 | `jsonIndex()` | `using gin` (use `jsonb()` on PostgreSQL) | skipped | skipped | skipped |
 | `descIndex()` | `(col desc)` | `(col desc)` | accepted, built ascending | `(col desc)` |
+| `jsonKeyIndex()` | `((col->>'key'))` | MySQL 8: `((cast(... as char(255)) collate utf8mb4_bin))`; MariaDB: skipped | skipped (no expression indexes) | `((json_extract(...)))` |
+| `coveringIndex()` | `(cols) include (extra)` (CockroachDB's `STORING`) | plain index on `cols` | plain index on `cols` | plain index on `cols` |
+| `trigramIndex()` | `using gin (col gin_trgm_ops)` | MySQL: fulltext `with parser ngram`; MariaDB: fulltext | fulltext `with parser ngram` | skipped |
+| `partialIndex()` | `(cols) where ...` | plain index, condition dropped (warning) | plain index, condition dropped (warning) | `(cols) where ...` |
+
+The `where` condition of `partialIndex()` is raw SQL: keep it portable (`deleted_at is null`, `status = 'active'`).
 
 ## Switching databases
 
