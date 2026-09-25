@@ -179,6 +179,11 @@ class QueryMacrosTest extends TestCase
 
         $model = (new PortableItem)->setConnection($connection);
 
+        // Portable also accepts Eloquent builders and relations.
+        $expected = Portable::on($connection)->dialect()->jsonNumber('meta->amount');
+        $this->assertSame($expected, Portable::on($model->newQuery())->dialect()->jsonNumber('meta->amount'));
+        $this->assertSame($expected, Portable::on($model->hasMany(PortableItem::class, 'id'))->dialect()->jsonNumber('meta->amount'));
+
         $this->assertEquals(204000, $model->newQuery()->sumJson('meta->amount'));
         $this->assertSame([1], $model->newQuery()->whereJsonNumber('meta->ratio', '>=', 0.8)->pluck('id')->map(fn ($id) => (int) $id)->all());
 

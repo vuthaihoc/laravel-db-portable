@@ -6,6 +6,7 @@ use DbPortable\Dialects\Dialect;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Facades\DB;
@@ -14,19 +15,21 @@ use Illuminate\Support\Facades\DB;
  * Portable SQL expressions for raw query parts (selectRaw, groupBy, joins):
  *
  *     Portable::jsonNumber('plan_data->amount')          // default connection
- *     Portable::on('crdb')->jsonText('flags->device')
- *     Portable::on($query)->castText('tags')
+ *     Portable::on('crdb')->text('flags->device')
+ *     Portable::on($query)->asText('tags')              // a query, Eloquent builder or relation
+ *     Portable::on($query)->dialect()->jsonBool('flags->sync')   // the SQL string
  */
 final class Portable
 {
     private function __construct(private readonly Dialect $dialect) {}
 
     /**
-     * @param  Connection|Builder|EloquentBuilder<Model>|string|null  $source  a connection (name) or a query
+     * @param  Connection|Builder|EloquentBuilder<Model>|Relation<Model, Model, mixed>|string|null  $source  a connection (name), a query or a relation
      */
-    public static function on(Connection|Builder|EloquentBuilder|string|null $source = null): self
+    public static function on(Connection|Builder|EloquentBuilder|Relation|string|null $source = null): self
     {
         $grammar = match (true) {
+            $source instanceof Relation => $source->getQuery()->getQuery()->getGrammar(),
             $source instanceof EloquentBuilder => $source->getQuery()->getGrammar(),
             $source instanceof Builder => $source->getGrammar(),
             $source instanceof Connection => $source->query()->getGrammar(),
