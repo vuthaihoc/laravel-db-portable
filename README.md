@@ -14,7 +14,14 @@ It grew out of moving a Laravel application from CockroachDB to MatrixOne. Most 
 composer require vuthaihoc/laravel-db-portable
 ```
 
-Requires PHP 8.2+ and Laravel 12 or 13. The service provider is discovered automatically.
+Requires PHP 8.2+ and Laravel 12 or 13. The service provider is discovered automatically. The package works with Laravel's own drivers (PostgreSQL, MySQL, MariaDB, SQLite) and with these third-party drivers:
+
+| Database | Driver | Install |
+|----------|--------|---------|
+| MatrixOne | [vuthaihoc/laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) | `composer require vuthaihoc/laravel-matrixone:^1.0@beta` |
+| CockroachDB | [vuthaihoc/cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) | `composer require vuthaihoc/cockroachdb-laravel:^2.2` |
+
+The API may still change before 1.0: pin a minor version (`^0.1`).
 
 ## Laravel already covers a lot
 
@@ -147,7 +154,7 @@ docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v2
     start-single-node --insecure --store=type=mem,size=1GiB
 ```
 
-Override the servers with `MATRIXONE_HOST`, `MATRIXONE_PORT`, `CRDB_HOST`, `CRDB_PORT` (see `phpunit.xml.dist`). During development, `composer.json` loads `vuthaihoc/laravel-matrixone` and `vuthaihoc/cockroachdb-laravel` from sibling directories (`../laravel-matrixone`, `../crdb2025`).
+Override the servers with `MATRIXONE_HOST`, `MATRIXONE_PORT`, `CRDB_HOST`, `CRDB_PORT` (see `phpunit.xml.dist`). To test against local checkouts of the drivers, add path repositories to a local copy of `composer.json` (`"repositories": [{"type": "path", "url": "../laravel-matrixone"}]`) and require them as `@dev`.
 
 ## License
 

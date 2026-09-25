@@ -1,7 +1,17 @@
 {
     "name": "vuthaihoc/laravel-db-portable",
     "description": "Portable query builder helpers for JSON numbers, NULLS LAST and JSON counters across PostgreSQL/CockroachDB, MySQL/MariaDB/MatrixOne and SQLite, plus scan, audit and copy tools for switching database drivers",
-    "keywords": ["laravel", "database", "portable", "json", "cockroachdb", "matrixone", "mysql", "postgresql", "migration"],
+    "keywords": [
+        "laravel",
+        "database",
+        "portable",
+        "json",
+        "cockroachdb",
+        "matrixone",
+        "mysql",
+        "postgresql",
+        "migration"
+    ],
     "homepage": "https://github.com/vuthaihoc/laravel-db-portable",
     "license": "MIT",
     "authors": [
@@ -21,21 +31,13 @@
         "laravel/pint": "^1.17",
         "orchestra/testbench": "^10.0",
         "phpunit/phpunit": "^11.5",
-        "vuthaihoc/cockroachdb-laravel": "@dev",
-        "vuthaihoc/laravel-matrixone": "@dev"
+        "vuthaihoc/cockroachdb-laravel": "^2.2",
+        "vuthaihoc/laravel-matrixone": "^1.0@beta"
     },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../laravel-matrixone",
-            "options": { "symlink": true }
-        },
-        {
-            "type": "path",
-            "url": "../crdb2025",
-            "options": { "symlink": true }
-        }
-    ],
+    "suggest": {
+        "vuthaihoc/laravel-matrixone": "MatrixOne database driver",
+        "vuthaihoc/cockroachdb-laravel": "CockroachDB database driver"
+    },
     "autoload": {
         "psr-4": {
             "DbPortable\\": "src/"

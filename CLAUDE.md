@@ -10,7 +10,7 @@ Guidance for Claude Code when working in this repository.
 
 - `composer test` — PHPUnit. `Unit` needs no server; `Conformance` runs on SQLite, MatrixOne (127.0.0.1:6001, root/111) and CockroachDB (127.0.0.1:26258, `docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v25.3.2 start-single-node --insecure --store=type=mem,size=1GiB`); unreachable servers are skipped.
 - `composer phpstan` (level 8), `composer cs` / `composer cs:fix` (Pint).
-- Dev dependencies `vuthaihoc/laravel-matrixone` and `vuthaihoc/cockroachdb-laravel` come from the sibling directories `../laravel-matrixone` and `../crdb2025` (path repositories, symlinked).
+- Dev dependencies `vuthaihoc/laravel-matrixone` (`^1.0@beta`) and `vuthaihoc/cockroachdb-laravel` (`^2.2`) come from Packagist; their sources live in `../laravel-matrixone` and `../crdb2025`.
 
 ## Architecture
 
