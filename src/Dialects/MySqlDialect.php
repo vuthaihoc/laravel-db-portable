@@ -46,8 +46,8 @@ class MySqlDialect extends Dialect
         $current = 'cast('.$this->jsonText($path).' as '.(is_int($amount) ? 'signed' : 'double').')';
 
         return [$column, sprintf(
-            'json_set(coalesce(%s, json_object()), %s, coalesce(%s, 0) + %s)',
-            $wrapped, $jsonPath, $current, $this->number($amount)
+            "json_set(case when json_type(%s) = 'OBJECT' then %s else json_object() end, %s, coalesce(%s, 0) + %s)",
+            $wrapped, $wrapped, $jsonPath, $current, $this->number($amount)
         )];
     }
 

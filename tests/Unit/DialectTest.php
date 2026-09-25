@@ -60,7 +60,7 @@ class DialectTest extends TestCase
         $this->assertSame('x desc nulls last', $dialect->orderNullsLast('x', 'desc'));
         $this->assertSame('"tags"::text', $dialect->castText('tags'));
         $this->assertSame(
-            ['meta', 'jsonb_set(coalesce("meta"::jsonb, \'{}\'::jsonb), \'{"a","b"}\', to_jsonb(coalesce(("meta"->\'a\'->>\'b\')::numeric, 0) + 2), true)'],
+            ['meta', 'jsonb_set(case when jsonb_typeof("meta"::jsonb) = \'object\' then "meta"::jsonb else \'{}\'::jsonb end, \'{"a","b"}\', to_jsonb(coalesce(("meta"->\'a\'->>\'b\')::numeric, 0) + 2), true)'],
             $dialect->jsonIncrement('meta->a->b', 2)
         );
     }
@@ -76,7 +76,7 @@ class DialectTest extends TestCase
         $this->assertSame('cast(`tags` as char)', $mysql->castText('tags'));
         $this->assertSame('cast(`tags` as text)', $this->dialect(MatrixOneGrammar::class)->castText('tags'));
         $this->assertSame(
-            ['meta', 'json_set(coalesce(`meta`, json_object()), \'$."views"\', coalesce(cast(json_unquote(json_extract(`meta`, \'$."views"\')) as signed), 0) + 1)'],
+            ['meta', 'json_set(case when json_type(`meta`) = \'OBJECT\' then `meta` else json_object() end, \'$."views"\', coalesce(cast(json_unquote(json_extract(`meta`, \'$."views"\')) as signed), 0) + 1)'],
             $mysql->jsonIncrement('meta->views', 1)
         );
         $this->assertStringContainsString('as double)', $mysql->jsonIncrement('meta->ratio', 0.5)[1]);

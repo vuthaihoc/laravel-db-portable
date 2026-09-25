@@ -35,8 +35,8 @@ class PostgresDialect extends Dialect
         $wrapped = $this->grammar->wrap($column);
 
         return [$column, sprintf(
-            "jsonb_set(coalesce(%s::jsonb, '{}'::jsonb), %s, to_jsonb(coalesce(%s, 0) + %s), true)",
-            $wrapped, $pointer, $this->jsonNumber($path), $this->number($amount)
+            "jsonb_set(case when jsonb_typeof(%s::jsonb) = 'object' then %s::jsonb else '{}'::jsonb end, %s, to_jsonb(coalesce(%s, 0) + %s), true)",
+            $wrapped, $wrapped, $pointer, $this->jsonNumber($path), $this->number($amount)
         )];
     }
 }

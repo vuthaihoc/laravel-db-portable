@@ -49,7 +49,7 @@ Post::query()->orderByNullsLast('published_at', 'desc')->get();
 DB::table('plan_orders')->where('status', 1)->sumJson('plan_data->amount');
 Order::query()->avgJson('meta->total');           // also minJson(), maxJson()
 
-// Increment a JSON counter (a missing key or NULL column counts as 0)
+// Increment a JSON counter (a missing key counts as 0; NULL or "[]" starts from {})
 Video::query()->whereKey($id)->incrementJson('video_reactions->like');
 Video::query()->whereKey($id)->decrementJson('video_reactions->like', 2);
 ```
@@ -64,7 +64,7 @@ What they compile to:
 | JSON boolean | `(col->>'k')::boolean` | `json_unquote(json_extract(...)) = 'true'` | `json_extract(...) = 1` |
 | `desc` nulls last | `x desc nulls last` | `x desc` (NULLs already last) | `x desc nulls last` |
 | `asc` nulls last | `x asc nulls last` | `(x) is null, x asc` | `x asc nulls last` |
-| JSON increment | `jsonb_set(coalesce(col::jsonb, '{}'), '{k}', to_jsonb(... + n), true)` | `json_set(coalesce(col, json_object()), '$."k"', ... + n)` | `json_set(coalesce(col, '{}'), '$."k"', ... + n)` |
+| JSON increment | `jsonb_set(<col if object, else '{}'>, '{k}', to_jsonb(... + n), true)` | `json_set(<col if object, else json_object()>, '$."k"', ... + n)` | `json_set(<col if object, else '{}'>, '$."k"', ... + n)` |
 
 For raw query parts, `Portable` returns the same expressions:
 

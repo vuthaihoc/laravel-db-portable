@@ -67,8 +67,9 @@ abstract class Dialect
     }
 
     /**
-     * [column, expression] setting a JSON path to its numeric value plus $amount
-     * (a missing key or NULL column counts as 0).
+     * [column, expression] setting a JSON path to its numeric value plus $amount.
+     * A missing key counts as 0; a column that is not a JSON object (NULL,
+     * or "[]" as Laravel stores an empty array) starts from {}.
      *
      * @return array{string, string}
      */

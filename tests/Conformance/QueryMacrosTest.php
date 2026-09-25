@@ -126,6 +126,7 @@ class QueryMacrosTest extends TestCase
 
         $this->table()->where('id', 1)->incrementJson('meta->amount', 5);
         $this->table()->where('id', 2)->decrementJson('meta->amount', 1000);
+        $this->table()->where('id', 3)->update(['meta' => '[]']);
         $this->table()->whereIn('id', [3, 4])->incrementJson('meta->views');
         $this->table()->where('id', 1)->incrementJson('meta->ratio', 0.5);
 

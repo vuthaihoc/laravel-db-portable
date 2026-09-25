@@ -40,8 +40,8 @@ class SQLiteDialect extends Dialect
         $wrapped = $this->grammar->wrap($column);
 
         return [$column, sprintf(
-            "json_set(coalesce(%s, '{}'), %s, coalesce(%s, 0) + %s)",
-            $wrapped, $jsonPath, $this->jsonText($path), $this->number($amount)
+            "json_set(case when json_type(%s) = 'object' then %s else '{}' end, %s, coalesce(%s, 0) + %s)",
+            $wrapped, $wrapped, $jsonPath, $this->jsonText($path), $this->number($amount)
         )];
     }
 }
