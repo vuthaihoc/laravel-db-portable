@@ -18,10 +18,10 @@ Requires PHP 8.2+ and Laravel 12 or 13. The service provider is discovered autom
 
 | Database | Driver | Install |
 |----------|--------|---------|
-| MatrixOne | [vuthaihoc/laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) | `composer require vuthaihoc/laravel-matrixone:^1.0@beta` |
-| CockroachDB | [vuthaihoc/cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) | `composer require vuthaihoc/cockroachdb-laravel:^2.2` |
+| MatrixOne | [vuthaihoc/laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) | `composer require vuthaihoc/laravel-matrixone` |
+| CockroachDB | [vuthaihoc/cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) | `composer require vuthaihoc/cockroachdb-laravel` |
 
-The API may still change before 1.0: pin a minor version (`^0.1`).
+The API may still change before 1.0: pin a minor version (`^0.3`).
 
 ## Laravel already covers a lot
 
