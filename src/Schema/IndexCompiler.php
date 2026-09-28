@@ -11,7 +11,7 @@ use Illuminate\Support\Fluent;
 
 /**
  * SQL of the portable index commands (jsonKeyIndex, coveringIndex,
- * trigramIndex, partialIndex) per database family.
+ * trigramIndex, partialIndex, and jsonIndex on PostgreSQL) per database family.
  */
 final class IndexCompiler
 {
@@ -31,6 +31,12 @@ final class IndexCompiler
             'covering' => $this->covering($blueprint, $command),
             'trigram' => $this->trigram($blueprint, $command),
             'partial' => $this->partial($blueprint, $command),
+            'jsonGin' => sprintf(
+                'create index %s on %s using gin ((%s::jsonb))',
+                $this->grammar->wrap($this->name($command)),
+                $this->grammar->wrapTable($blueprint),
+                $this->grammar->wrap($this->columns($command)[0]),
+            ),
             default => null,
         };
     }

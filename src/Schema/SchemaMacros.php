@@ -23,14 +23,22 @@ final class SchemaMacros
 {
     public static function register(): void
     {
-        // A GIN index on a whole JSON column (PostgreSQL: use jsonb()).
+        // A GIN index on a whole JSON column, for whereJsonContains().
         Blueprint::macro('jsonIndex', function (string $column, ?string $name = null): Fluent {
             /** @var Blueprint $this */
             /** @var Connection $connection */
             $connection = (fn () => $this->connection)->call($this);
 
+            if ($connection->getDriverName() === 'crdb') {
+                return $this->index($column, $name, 'gin');   // json is jsonb on CockroachDB
+            }
+
             if (Family::of($connection) === Family::POSTGRES) {
-                return $this->index($column, $name, 'gin');
+                // GIN has no operator class for json: index (col)::jsonb, the expression of
+                // Laravel's whereJsonContains() (a no-op cast on a jsonb column).
+                $name ??= (fn () => $this->createIndexName('index', [$column]))->call($this);
+
+                return (fn () => $this->addCommand('portableIndex', ['kind' => 'jsonGin', 'index' => $name, 'columns' => [$column]]))->call($this);
             }
 
             Unsupported::skip("jsonIndex('{$column}') on {$connection->getDriverName()}: there is no index on a whole JSON column; index a scalar column instead.");

@@ -47,7 +47,8 @@ class SchemaMacrosSqlTest extends TestCase
         });
 
         $this->assertStringContainsString('"tags" jsonb not null default \'[]\'', $sql[0]);
-        $this->assertSame('create index "items_tags_index" on "items" using gin ("tags")', $sql[1]);
+        // (col)::jsonb, the expression of whereJsonContains(): GIN has no operator class for json.
+        $this->assertSame('create index "items_tags_index" on "items" using gin (("tags"::jsonb))', $sql[1]);
     }
 
     public function test_desc_index_sql(): void
