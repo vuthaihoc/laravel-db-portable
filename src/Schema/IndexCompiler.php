@@ -94,9 +94,18 @@ final class IndexCompiler
     {
         $column = $this->columns($command)[0];
         $name = $this->grammar->wrap($this->name($command));
+        $expression = $this->grammar->wrap($column);
+
+        if ($command->get('unaccent')) {
+            if ($this->connection->getDriverName() === 'crdb') {
+                $expression = "unaccent(lower({$expression}))";
+            } elseif (Family::of($this->connection) === Family::POSTGRES) {
+                Unsupported::skip("trigramIndex('{$column}', unaccent: true) on {$this->connection->getDriverName()}: unaccent() is not immutable on PostgreSQL, the index is on the column.");
+            }
+        }
 
         return match (Family::of($this->connection)) {
-            Family::POSTGRES => sprintf('create index %s on %s using gin (%s gin_trgm_ops)', $name, $this->grammar->wrapTable($blueprint), $this->grammar->wrap($column)),
+            Family::POSTGRES => sprintf('create index %s on %s using gin (%s gin_trgm_ops)', $name, $this->grammar->wrapTable($blueprint), $expression),
             Family::MYSQL => $this->grammar instanceof MariaDbGrammar
                 ? sprintf('alter table %s add fulltext %s (%s)', $this->grammar->wrapTable($blueprint), $name, $this->grammar->wrap($column))
                 : (Family::isMatrixOne($this->connection)

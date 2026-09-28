@@ -110,10 +110,11 @@ final class SchemaMacros
             return $portableIndex($this, 'covering', (array) $columns, '', $name, ['include' => (array) $include]);
         });
 
-        // Fuzzy search on a text column: trigramIndex('word').
-        Blueprint::macro('trigramIndex', function (string $column, ?string $name = null) use ($portableIndex): Fluent {
+        // Fuzzy search on a text column: trigramIndex('word'); trigramIndex('word', unaccent: true)
+        // for suggest('word', $search, unaccent: true).
+        Blueprint::macro('trigramIndex', function (string $column, ?string $name = null, bool $unaccent = false) use ($portableIndex): Fluent {
             /** @var Blueprint $this */
-            return $portableIndex($this, 'trigram', [$column], '_trigram', $name);
+            return $portableIndex($this, 'trigram', [$column], $unaccent ? '_trigram_unaccent' : '_trigram', $name, ['unaccent' => $unaccent]);
         });
 
         // An index on some rows: partialIndex('email', 'deleted_at is null').

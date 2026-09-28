@@ -127,6 +127,30 @@ $query->selectRaw('sum(' . Portable::on($query)->number('plan_data->amount')->ge
 Portable::on('crdb')->asText('tags');                                              // "tags"::text
 ```
 
+### Search boxes and full-text relevance
+
+```php
+Word::suggest('word', $search)->limit(10)->get();             // autocomplete
+Word::suggest('word', $search, unaccent: true)->limit(10)->get();   // "chao" finds "chào"
+Word::whereStartsWith('word', $search)->get();                // % and _ are matched literally
+Word::whereContains('word', $search)->get();
+Word::whereSimilar('word', $search)->orderBySimilarity('word', $search)->get();   // typo tolerant
+
+Post::searchFullText(['title', 'body'], $search)->get();      // whereFullText(), most relevant first
+Post::select('*')->selectFullTextRelevance(['title', 'body'], $search)->get();
+```
+
+`suggest()` returns values starting with the search and, from 3 characters, values containing it (or similar to it, with trigrams): prefix matches first, then the most similar, then the shortest.
+
+| | CockroachDB | PostgreSQL | MatrixOne | MySQL, MariaDB | SQLite |
+|---|---|---|---|---|---|
+| `whereStartsWith()`, `whereContains()` | `ilike`, trigram index | `ilike`, trigram index | `ilike` | `like` (the `_ci` collation) | `like` (ASCII case only) |
+| `unaccent: true` | `unaccent(lower(col))` | `unaccent()` (extension) | no effect: accents count | the collation decides | no effect |
+| `whereSimilar()`, `orderBySimilarity()` | `%` and `similarity()` (driver) | `%` and `similarity()` (`pg_trgm`) | contains; score 1 prefix / 0.5 contains (warning) | same as MatrixOne | same as MatrixOne |
+| `searchFullText()`, `*FullTextRelevance()` | `ts_rank` (driver) | `ts_rank` | `match ... against` (driver) | `match ... against` | no `whereFullText()`; relevance 0 (warning) |
+
+The drivers ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.3+, [laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) 1.1+) implement these methods themselves; the macros cover the other databases. MatrixOne has no typo-tolerant search: its `ngram` parser splits only CJK text into n-grams. The trigram threshold of `%` is the session's `pg_trgm.similarity_threshold` (0.3): set it with the connection's `variables` option on CockroachDB.
+
 ## Migrations
 
 Blueprint macros for schema features that differ between databases. When a database has no equivalent, the macro skips the feature and logs a warning. Set `config(['db-portable.strict' => true])` to throw instead.
@@ -177,7 +201,7 @@ Schema::forDriver([
 | `descIndex()` | `(col desc)` | `(col desc)` | `(col desc)` | accepted, built ascending | `(col desc)` |
 | `jsonKeyIndex()` | `((col->>'key'))` | functional index `((cast(... as char(255)) collate utf8mb4_bin))` (8.0.13+) | skipped | skipped (no expression indexes) | `((json_extract(...)))` |
 | `coveringIndex()` | `(cols) include (extra)` (CockroachDB's `STORING`) | plain index on `cols` | plain index on `cols` | plain index on `cols` | plain index on `cols` |
-| `trigramIndex()` | `using gin (col gin_trgm_ops)` | fulltext `with parser ngram` | fulltext | fulltext `with parser ngram` | skipped |
+| `trigramIndex()` | `using gin (col gin_trgm_ops)`; `unaccent: true`: `(unaccent(lower(col)) gin_trgm_ops)` on CockroachDB, the column on PostgreSQL (warning) | fulltext `with parser ngram` | fulltext | fulltext `with parser ngram` (CJK n-grams, whole words otherwise) | skipped |
 | `partialIndex()` | `(cols) where ...` | plain index, condition dropped | plain index, condition dropped | plain index, condition dropped | `(cols) where ...` |
 
 Skipped features and dropped conditions log a warning (or throw with `db-portable.strict`). `forDriver()` runs the callback of the connection's driver or family and emits nothing by itself.

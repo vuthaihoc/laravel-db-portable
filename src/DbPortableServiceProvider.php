@@ -8,6 +8,7 @@ use DbPortable\Console\ScanCommand;
 use DbPortable\Dialects\Dialect;
 use DbPortable\Query\AnalyticsMacros;
 use DbPortable\Query\HistoricalReadMacros;
+use DbPortable\Query\SearchMacros;
 use DbPortable\Schema\SchemaMacros;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
@@ -25,6 +26,7 @@ class DbPortableServiceProvider extends ServiceProvider
         SchemaMacros::register();
         AnalyticsMacros::register();
         HistoricalReadMacros::register();
+        SearchMacros::register();
     }
 
     public function boot(): void
