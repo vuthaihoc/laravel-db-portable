@@ -51,11 +51,11 @@ class CopyCommand extends Command
             dryRun: $dryRun,
             progress: fn (string $table, int $rows, string $status) => $this->components->twoColumnDetail(
                 $table,
-                str_starts_with($status, 'failed') ? "<fg=red>{$status}</>" : "{$rows} <fg=gray>{$status}</>"
+                self::failed($status) ? "{$rows} <fg=red>{$status}</>" : "{$rows} <fg=gray>{$status}</>"
             ),
         );
 
-        $failed = array_filter($report, fn ($entry) => str_starts_with($entry['status'], 'failed'));
+        $failed = array_filter($report, fn ($entry) => self::failed($entry['status']));
 
         $this->newLine();
         $this->components->info(sprintf(
@@ -63,9 +63,14 @@ class CopyCommand extends Command
             count($report),
             array_sum(array_column($report, 'rows')),
             $dryRun ? 'to copy' : 'copied',
-            $failed ? ', '.count($failed).' failed' : ''
+            $failed ? ', '.count($failed).' failed or incomplete' : ''
         ));
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    private static function failed(string $status): bool
+    {
+        return str_starts_with($status, 'failed') || str_starts_with($status, 'incomplete');
     }
 }

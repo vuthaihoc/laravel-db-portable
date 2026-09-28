@@ -285,9 +285,11 @@ php artisan db-portable:copy --from=crdb --to=matrixone --resume       # continu
 ```
 
 - Copies the columns present on both sides and skips `migrations` (change it with `--except`).
-- Reads in primary-key order (keyset pagination, `--chunk=500`). `--resume` starts after the highest key already in the target.
+- Reads in primary-key order (keyset pagination, `--chunk=500`); tables with a composite key or none are read in pages ordered by those columns. `--resume` starts after the highest key already in the target when the key is an integer; other keys are read again from the start.
 - Converts values for the target: timestamps with a time zone offset become UTC for MySQL-family `datetime` columns, booleans match the target type, and arrays are encoded as JSON.
-- Disables foreign key checks on MySQL-family and SQLite targets while copying. Rows are inserted with `insertOrIgnore()`, so a rerun does not duplicate them.
+- Copies parent tables before the tables whose foreign keys reference them (PostgreSQL and CockroachDB targets keep checking foreign keys), and disables foreign key checks on MySQL-family and SQLite targets while copying.
+- Moves the sequences of serial and identity columns on a PostgreSQL or CockroachDB target past the copied keys, so the next insert does not collide.
+- Rows are inserted with `insertOrIgnore()`, so a rerun does not duplicate them. Rows the target ignores (duplicates, values it rejects) are reported as `skipped`, and a table whose target ends with fewer rows than the source is reported as `incomplete`; the command then fails, like for a failed table (reported with the rows copied before the error).
 
 ## Testing
 
