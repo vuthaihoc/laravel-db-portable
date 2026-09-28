@@ -99,6 +99,24 @@ DB::table('sales')
 
 On CockroachDB and SQLite, `rollup()` cannot be combined with `having()`, `limit()` or `offset()`, and the `groupBy()` columns must be selected by name.
 
+### Stale and historical reads
+
+Named by intent; the drivers compile them:
+
+```php
+Order::query()->readStale()->selectSumWhere('paid', 'total', fn ($q) => $q->where('status', 'paid'))->first();
+DB::table('orders')->asOfTime('-10s')->count();              // or a DateTimeInterface
+DB::table('orders')->asOfTime(now()->subHour())->readCurrent()->count();   // back to current data
+```
+
+| | CockroachDB | MatrixOne | PostgreSQL, MySQL, MariaDB | SQLite |
+|---|---|---|---|---|
+| `readStale()` | follower read (`AS OF SYSTEM TIME follower_read_timestamp()`, about 4.8 s old) | no change: reads do not contend with writes | no change: Laravel already reads from the `read` connection when one is configured | no change |
+| `asOfTime($time)` | `AS OF SYSTEM TIME` | `{as of timestamp '...'}` (in the connection's time zone) | skipped with a warning (throws with `db-portable.strict`) | same |
+| `readCurrent()` | removes it | removes it | no change | no change |
+
+They need the drivers' historical reads: `vuthaihoc/cockroachdb-laravel` 2.2.2+ and `vuthaihoc/laravel-matrixone`. CockroachDB does not accept them in subqueries or inside a transaction (the driver then reads current data). The time read must be after the table was created, and within the database's history retention (MatrixOne: PITR or garbage-collection window).
+
 For raw query parts, `Portable` returns the same expressions:
 
 ```php

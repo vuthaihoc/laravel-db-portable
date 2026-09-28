@@ -31,7 +31,7 @@
         "laravel/pint": "^1.17",
         "orchestra/testbench": "^10.0",
         "phpunit/phpunit": "^11.5",
-        "vuthaihoc/cockroachdb-laravel": "^2.2.1",
+        "vuthaihoc/cockroachdb-laravel": "^2.2.2",
         "vuthaihoc/laravel-matrixone": "^1.0"
     },
     "suggest": {
