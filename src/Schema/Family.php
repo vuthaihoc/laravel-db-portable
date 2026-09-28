@@ -3,6 +3,7 @@
 namespace DbPortable\Schema;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Database\Schema\Grammars\MySqlGrammar;
 use Illuminate\Database\Schema\Grammars\PostgresGrammar;
 use Illuminate\Database\Schema\Grammars\SQLiteGrammar;
@@ -21,7 +22,14 @@ final class Family
 
     public static function of(Connection $connection): ?string
     {
-        $connection->useDefaultSchemaGrammar();
+        // Keep a schema grammar the application installed; only fill in a missing one
+        // (Laravel types it as always set, but it is null until first needed).
+        /** @var Grammar|null $grammar */
+        $grammar = $connection->getSchemaGrammar();
+
+        if ($grammar === null) {
+            $connection->useDefaultSchemaGrammar();
+        }
 
         return match (true) {
             $connection->getSchemaGrammar() instanceof PostgresGrammar => self::POSTGRES,
