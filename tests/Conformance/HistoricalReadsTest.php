@@ -2,6 +2,9 @@
 
 namespace DbPortable\Tests\Conformance;
 
+use DbPortable\Contracts\HistoricalReads;
+use DbPortable\Contracts\SearchBox;
+use DbPortable\Contracts\SimilaritySearch;
 use DbPortable\Tests\TestCase;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Schema\Blueprint;
@@ -39,6 +42,22 @@ class HistoricalReadsTest extends TestCase
     private function table(): Builder
     {
         return DB::connection($this->connection)->table('portable_history');
+    }
+
+    #[DataProvider('connections')]
+    public function test_the_drivers_implement_the_contracts(string $connection): void
+    {
+        $query = DB::connection($connection)->query();
+        $implements = fn (string $contract) => $query instanceof $contract;
+
+        $this->assertSame(
+            match ($connection) {
+                'crdb' => [true, true, true],
+                'matrixone' => [true, true, false],
+                default => [false, false, false],
+            },
+            array_map($implements, [HistoricalReads::class, SearchBox::class, SimilaritySearch::class])
+        );
     }
 
     #[DataProvider('connections')]

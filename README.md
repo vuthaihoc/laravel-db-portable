@@ -115,7 +115,7 @@ DB::table('orders')->asOfTime(now()->subHour())->readCurrent()->count();   // ba
 | `asOfTime($time)` | `AS OF SYSTEM TIME` | `{as of timestamp '...'}` (in the connection's time zone) | skipped with a warning (throws with `db-portable.strict`) | same |
 | `readCurrent()` | removes it | removes it | no change | no change |
 
-They need the drivers' historical reads: `vuthaihoc/cockroachdb-laravel` 2.2.2+ and `vuthaihoc/laravel-matrixone`. CockroachDB does not accept them in subqueries or inside a transaction (the driver then reads current data). The time read must be after the table was created, and within the database's history retention (MatrixOne: PITR or garbage-collection window).
+The drivers implement them (`vuthaihoc/cockroachdb-laravel` 2.5+, `vuthaihoc/laravel-matrixone` 1.2+; older versions conflict with this package). CockroachDB does not accept them in subqueries or inside a transaction (the driver then reads current data). The time read must be after the table was created, and within the database's history retention (MatrixOne: PITR or garbage-collection window).
 
 For raw query parts, `Portable` returns the same expressions:
 
@@ -149,7 +149,7 @@ Post::select('*')->selectFullTextRelevance(['title', 'body'], $search)->get();
 | `whereSimilar()`, `orderBySimilarity()` | `%` and `similarity()` (driver) | `%` and `similarity()` (`pg_trgm`) | contains; score 1 prefix / 0.5 contains (warning) | same as MatrixOne | same as MatrixOne |
 | `searchFullText()`, `*FullTextRelevance()` | `ts_rank` (driver) | `ts_rank` | `match ... against` (driver) | `match ... against` | no `whereFullText()`; relevance 0 (warning) |
 
-The drivers ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.3+, [laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) 1.1+) implement these methods themselves; the macros cover the other databases.
+The drivers ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.5+, [laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) 1.2+) implement these methods themselves; the macros cover the other databases.
 
 #### Contracts
 

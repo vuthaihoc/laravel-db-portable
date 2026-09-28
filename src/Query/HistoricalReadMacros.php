@@ -11,41 +11,26 @@ use Illuminate\Database\Query\Builder;
 use InvalidArgumentException;
 
 /**
- * Historical and stale reads named by intent; the drivers compile them:
- * CockroachDB (vuthaihoc/cockroachdb-laravel) with AS OF SYSTEM TIME and
- * follower reads, MatrixOne (vuthaihoc/laravel-matrixone) with
- * {as of timestamp}. Other databases have no time travel.
+ * Historical and stale reads named by intent. The drivers implement them
+ * (DbPortable\Contracts\HistoricalReads): CockroachDB (vuthaihoc/cockroachdb-laravel)
+ * with AS OF SYSTEM TIME and follower reads, MatrixOne (vuthaihoc/laravel-matrixone)
+ * with {as of timestamp}. These macros only run on the other databases, which have
+ * no time travel.
  */
 final class HistoricalReadMacros
 {
     public static function register(): void
     {
-        // Data a few seconds old is fine (dashboards, reports).
+        // Data a few seconds old is fine (dashboards, reports). Elsewhere Laravel already
+        // reads from the "read" connection when one is configured.
         Builder::macro('readStale', function () {
             /** @var Builder $this */
-            if (method_exists($this, 'followerRead')) {
-                return $this->followerRead();
-            }
-
-            // Elsewhere reads do not contend with writes that way (MatrixOne's
-            // MVCC), or Laravel already reads from the "read" connection.
             return $this;
         });
 
         // Read the data as it was at a point in the past: asOfTime('-10s'), asOfTime(now()->subHour()).
         Builder::macro('asOfTime', function (DateTimeInterface|string $time) {
             /** @var Builder $this */
-            if (method_exists($this, 'asOfSystemTime')) {
-                return $this->asOfSystemTime($time);
-            }
-
-            if (method_exists($this, 'asOfTimestamp')) {
-                /** @var Connection $connection */
-                $connection = $this->getConnection();
-
-                return $this->asOfTimestamp(HistoricalReadMacros::moment($time, $connection));
-            }
-
             /** @var Connection $connection */
             $connection = $this->getConnection();
             Unsupported::skip("asOfTime() on {$connection->getDriverName()}: the database has no historical reads, so current data is read.");
@@ -56,14 +41,6 @@ final class HistoricalReadMacros
         // Back to current data.
         Builder::macro('readCurrent', function () {
             /** @var Builder $this */
-            if (method_exists($this, 'withoutHistoricalRead')) {
-                return $this->withoutHistoricalRead();
-            }
-
-            if (property_exists($this, 'timeTravel')) {
-                $this->timeTravel = null;
-            }
-
             return $this;
         });
     }
