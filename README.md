@@ -251,7 +251,7 @@ The `Unit` suite needs no server. The `Conformance` suite runs the same assertio
 
 ```bash
 # MatrixOne on 127.0.0.1:6001 (root / 111), see vuthaihoc/laravel-matrixone
-docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v25.3.2 \
+docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v26.2.6 \
     start-single-node --insecure --store=type=mem,size=1GiB
 ```
 

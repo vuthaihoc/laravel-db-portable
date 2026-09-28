@@ -71,6 +71,10 @@ class HistoricalReadsTest extends TestCase
     {
         $this->useConnection($connection);
 
+        if ($connection === 'crdb') {
+            sleep(6);   // the table must exist at the follower read timestamp
+        }
+
         $this->table()->insert(['id' => 1, 'total' => 10]);
 
         if ($connection === 'crdb') {
