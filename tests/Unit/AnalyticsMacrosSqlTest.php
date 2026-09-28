@@ -15,7 +15,7 @@ class AnalyticsMacrosSqlTest extends TestCase
     /**
      * @param  class-string<Connection>  $class
      */
-    private function query(string $class, string $driver): Builder
+    private function builderFor(string $class, string $driver): Builder
     {
         $connection = new $class(fn () => null, 'app', '', ['driver' => $driver]);
 
@@ -26,15 +26,15 @@ class AnalyticsMacrosSqlTest extends TestCase
     {
         $this->assertSame(
             'select `region`, sum(amount) as total from `sales` group by `region` with rollup',
-            $this->query(MySqlConnection::class, 'mysql')->rollup()->toSql()
+            $this->builderFor(MySqlConnection::class, 'mysql')->rollup()->toSql()
         );
         $this->assertSame(
             'select "region", sum(amount) as total from "sales" group by rollup ("region")',
-            $this->query(PostgresConnection::class, 'pgsql')->rollup()->toSql()
+            $this->builderFor(PostgresConnection::class, 'pgsql')->rollup()->toSql()
         );
         $this->assertSame(
             '(select "region", sum(amount) as total from "sales" group by "region") union all (select null as "region", sum(amount) as total from "sales")',
-            $this->query(CockroachDbConnection::class, 'crdb')->rollup()->toSql()
+            $this->builderFor(CockroachDbConnection::class, 'crdb')->rollup()->toSql()
         );
     }
 
