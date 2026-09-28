@@ -73,6 +73,32 @@ What they compile to:
 | `asc` nulls last | `x asc nulls last` | `(x) is null, x asc` | `x asc nulls last` |
 | JSON increment | `jsonb_set(<col if object, else '{}'>, '{k}', to_jsonb(... + n), true)` | `json_set(<col if object, else json_object()>, '$."k"', ... + n)` | `json_set(<col if object, else '{}'>, '$."k"', ... + n)` |
 
+### Dashboards: conditional aggregates and subtotals
+
+```php
+// Several counts and sums in one query (count(*) FILTER / sum(case ...) without writing either)
+DB::table('orders')
+    ->selectCountWhere('paid_orders', fn ($q) => $q->where('status', 'paid'))
+    ->selectSumWhere('refunded_total', 'total', fn ($q) => $q->where('status', 'refunded'))
+    ->selectAggregateWhere('max', 'total', fn ($q) => $q->where('channel', 'ios'), 'ios_max')   // count, sum, avg, min, max
+    ->first();
+
+// Subtotals per region and a grand total (rows where the grouped column is NULL)
+DB::table('sales')
+    ->select('region', 'product')
+    ->selectRaw('sum(amount) as total')
+    ->groupBy('region', 'product')
+    ->rollup()          // call it last
+    ->get();
+```
+
+| | PostgreSQL | CockroachDB, SQLite | MySQL, MariaDB, MatrixOne |
+|---|---|---|---|
+| `selectCountWhere()` / `selectSumWhere()` / `selectAggregateWhere()` | `count(case when … then 1 end)`, `sum(case when … then col end)` | same | same |
+| `rollup()` | `group by rollup (…)` | `union all` of one query per grouping level | `group by … with rollup` |
+
+On CockroachDB and SQLite, `rollup()` cannot be combined with `having()`, `limit()` or `offset()`, and the `groupBy()` columns must be selected by name.
+
 For raw query parts, `Portable` returns the same expressions:
 
 ```php
