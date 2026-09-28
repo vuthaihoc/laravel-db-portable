@@ -211,7 +211,7 @@ Schema::forDriver([
 | Macro | PostgreSQL / CockroachDB | MySQL | MariaDB | MatrixOne | SQLite |
 |-------|--------------------------|-------|---------|-----------|--------|
 | `jsonWithDefault()` | `default '[]'` | `default ('[]')` | `default ('[]')` | skipped: the column is nullable, set the default in the model's `$attributes` | `default '[]'` |
-| `jsonIndex()` | `using gin` (use `jsonb()` on PostgreSQL) | skipped | skipped | skipped | skipped |
+| `jsonIndex()` | `using gin ((col::jsonb))` on PostgreSQL, the expression of `whereJsonContains()`; `using gin (col)` on CockroachDB | skipped | skipped | skipped | skipped |
 | `descIndex()` | `(col desc)` | `(col desc)` | `(col desc)` | accepted, built ascending | `(col desc)` |
 | `jsonKeyIndex()` | `((col->>'key'))` | functional index `((cast(... as char(255)) collate utf8mb4_bin))` (8.0.13+) | skipped | skipped (no expression indexes) | `((json_extract(...)))` |
 | `coveringIndex()` | `(cols) include (extra)` (CockroachDB's `STORING`) | plain index on `cols` | plain index on `cols` | plain index on `cols` | plain index on `cols` |
@@ -311,15 +311,17 @@ php artisan db-portable:copy --from=crdb --to=matrixone --resume       # continu
 composer test
 ```
 
-The `Unit` suite needs no server. The `Conformance` suite runs the same assertions on SQLite (in memory), MatrixOne and CockroachDB, and skips a server that is not reachable:
+The `Unit` suite needs no server. The `Conformance` suite runs the same assertions on SQLite (in memory), MatrixOne, CockroachDB, PostgreSQL and MySQL, and skips a server that is not reachable (set `DB_PORTABLE_REQUIRE_SERVERS=1` to fail instead, as CI does):
 
 ```bash
 # MatrixOne on 127.0.0.1:6001 (root / 111), see vuthaihoc/laravel-matrixone
 docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v26.2.6 \
     start-single-node --insecure --store=type=mem,size=1GiB
+docker run -d --name db-portable-pg -p 127.0.0.1:5433:5432 -e POSTGRES_PASSWORD=secret postgres:17
+docker run -d --name db-portable-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=secret mysql:8.4
 ```
 
-Override the servers with `MATRIXONE_HOST`, `MATRIXONE_PORT`, `CRDB_HOST`, `CRDB_PORT` (see `phpunit.xml.dist`). To test against local checkouts of the drivers, add path repositories to a local copy of `composer.json` (`"repositories": [{"type": "path", "url": "../laravel-matrixone"}]`) and require them as `@dev`.
+Override the servers with `MATRIXONE_*`, `CRDB_*`, `PGSQL_*` and `MYSQL_*` (`_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`; see `phpunit.xml.dist`). The PostgreSQL test database gets the `pg_trgm` and `unaccent` extensions. To test against local checkouts of the drivers, add path repositories to a local copy of `composer.json` (`"repositories": [{"type": "path", "url": "../laravel-matrixone"}]`) and require them as `@dev`.
 
 ## License
 

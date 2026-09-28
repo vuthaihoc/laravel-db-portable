@@ -88,8 +88,8 @@ class SearchMacrosTest extends TestCase
 
         $words = $this->words($this->table()->whereSimilar('word', 'aple')->orderBySimilarity('word', 'aple'));
 
-        if ($connection === 'crdb') {
-            // Typo tolerant.
+        if (in_array($connection, ['crdb', 'pgsql'], true)) {
+            // Typo tolerant (trigrams).
             $this->assertSame('apple', $words[0]);
         } else {
             // whereContains() instead.
@@ -137,7 +137,7 @@ class SearchMacrosTest extends TestCase
         $this->useConnection($connection);
         config(['db-portable.strict' => true]);
 
-        if ($connection !== 'crdb') {
+        if (! in_array($connection, ['crdb', 'pgsql'], true)) {
             $this->expectException(\RuntimeException::class);
         }
 

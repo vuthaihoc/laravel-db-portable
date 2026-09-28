@@ -29,7 +29,7 @@ jobs:
       - run: composer phpstan -- --error-format=github
 
   tests:
-    name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }} - CRDB ${{ matrix.crdb }} - MO ${{ matrix.matrixone }}
+    name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }} - CRDB ${{ matrix.crdb }} - MO ${{ matrix.matrixone }} - PG 17 - MySQL 8.4
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -47,16 +47,26 @@ jobs:
       MATRIXONE_PORT: 6001
       CRDB_HOST: 127.0.0.1
       CRDB_PORT: 26258
+      PGSQL_HOST: 127.0.0.1
+      PGSQL_PORT: 5433
+      PGSQL_USERNAME: postgres
+      PGSQL_PASSWORD: secret
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3307
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: secret
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Start CockroachDB and MatrixOne
+      - name: Start CockroachDB, MatrixOne, PostgreSQL and MySQL
         run: |
           docker run -d --name crdb -p 127.0.0.1:26258:26257 \
             cockroachdb/cockroach:${{ matrix.crdb }} start-single-node --insecure --store=type=mem,size=1GiB
           docker run -d --name matrixone --hostname matrixone -p 127.0.0.1:6001:6001 \
             matrixorigin/matrixone:${{ matrix.matrixone }}
+          docker run -d --name pgsql -p 127.0.0.1:5433:5432 -e POSTGRES_PASSWORD=secret postgres:17
+          docker run -d --name mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=secret mysql:8.4
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -79,11 +89,12 @@ jobs:
           for i in $(seq 1 90); do
             docker exec crdb ./cockroach sql --insecure -e 'select 1' >/dev/null 2>&1 \
               && mysql -h 127.0.0.1 -P 6001 -u root -p111 -e 'select 1' >/dev/null 2>&1 \
+              && php -r 'new PDO("pgsql:host=127.0.0.1;port=5433;dbname=postgres", "postgres", "secret");' >/dev/null 2>&1 \
+              && mysql -h 127.0.0.1 -P 3307 -u root -psecret -e 'select 1' >/dev/null 2>&1 \
               && exit 0
             sleep 2
           done
-          docker logs --tail 50 crdb
-          docker logs --tail 50 matrixone
+          for c in crdb matrixone pgsql mysql; do docker logs --tail 50 $c; done
           exit 1
 
       - run: vendor/bin/phpunit --colors=always
@@ -91,5 +102,4 @@ jobs:
       - name: Server logs
         if: failure()
         run: |
-          docker logs --tail 200 crdb
-          docker logs --tail 200 matrixone
+          for c in crdb matrixone pgsql mysql; do docker logs --tail 200 $c; done

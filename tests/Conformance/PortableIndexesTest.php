@@ -51,18 +51,18 @@ class PortableIndexesTest extends TestCase
         $indexes = collect($schema->getIndexes('portable_indexes'))->pluck('columns', 'name');
 
         $expected = [
-            // name => created on crdb, matrixone, sqlite
-            'portable_indexes_meta_source_index' => ['crdb' => true, 'matrixone' => false, 'sqlite' => true],
-            'portable_indexes_video_id_index' => ['crdb' => true, 'matrixone' => true, 'sqlite' => true],
-            'portable_indexes_word_index_trigram' => ['crdb' => true, 'matrixone' => true, 'sqlite' => false],
-            'portable_indexes_title_index_partial' => ['crdb' => true, 'matrixone' => true, 'sqlite' => true],
+            // name => created on each connection
+            'portable_indexes_meta_source_index' => ['crdb' => true, 'pgsql' => true, 'matrixone' => false, 'mysql' => true, 'sqlite' => true],
+            'portable_indexes_video_id_index' => ['crdb' => true, 'pgsql' => true, 'matrixone' => true, 'mysql' => true, 'sqlite' => true],
+            'portable_indexes_word_index_trigram' => ['crdb' => true, 'pgsql' => true, 'matrixone' => true, 'mysql' => true, 'sqlite' => false],
+            'portable_indexes_title_index_partial' => ['crdb' => true, 'pgsql' => true, 'matrixone' => true, 'mysql' => true, 'sqlite' => true],
         ];
 
         foreach ($expected as $name => $created) {
             $this->assertSame($created[$connection], $indexes->has($name), "{$name} on {$connection}");
         }
 
-        if ($connection !== 'crdb') {
+        if (! in_array($connection, ['crdb', 'pgsql'], true)) {
             Log::shouldHaveReceived('warning')->atLeast()->once();
         }
 

@@ -23,6 +23,14 @@
     <env name="CRDB_HOST" value="127.0.0.1"/>
     <env name="CRDB_PORT" value="26258"/>
     <env name="CRDB_USERNAME" value="root"/>
+    <env name="PGSQL_HOST" value="127.0.0.1"/>
+    <env name="PGSQL_PORT" value="5433"/>
+    <env name="PGSQL_USERNAME" value="postgres"/>
+    <env name="PGSQL_PASSWORD" value="secret"/>
+    <env name="MYSQL_HOST" value="127.0.0.1"/>
+    <env name="MYSQL_PORT" value="3307"/>
+    <env name="MYSQL_USERNAME" value="root"/>
+    <env name="MYSQL_PASSWORD" value="secret"/>
   </php>
   <source>
     <include>

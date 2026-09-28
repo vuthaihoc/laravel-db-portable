@@ -73,7 +73,7 @@ class HistoricalReadsTest extends TestCase
         $past = $this->table()->asOfTime('-1s')->count();
         $sum = $this->table()->asOfTime(now()->subSecond())->sum('total');
 
-        if ($connection === 'sqlite') {
+        if (in_array($connection, ['sqlite', 'pgsql', 'mysql'], true)) {
             // No time travel: current data, and a warning.
             $this->assertSame(2, $past);
             Log::shouldHaveReceived('warning')->atLeast()->once();
@@ -115,7 +115,7 @@ class HistoricalReadsTest extends TestCase
         $this->useConnection($connection);
         config(['db-portable.strict' => true]);
 
-        if ($connection === 'sqlite') {
+        if (in_array($connection, ['sqlite', 'pgsql', 'mysql'], true)) {
             $this->expectException(RuntimeException::class);
         } else {
             sleep(2);   // the table must exist at the time read

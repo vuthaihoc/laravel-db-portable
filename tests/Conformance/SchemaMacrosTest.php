@@ -45,7 +45,7 @@ class SchemaMacrosTest extends TestCase
     public function test_json_index_and_default(string $connection): void
     {
         $this->useConnection($connection);
-        $postgres = $connection === 'crdb';
+        $postgres = in_array($connection, ['crdb', 'pgsql'], true);
 
         if (! $postgres) {
             Log::shouldReceive('warning')->atLeast()->once();
@@ -79,7 +79,7 @@ class SchemaMacrosTest extends TestCase
         $this->useConnection($connection);
         config(['db-portable.strict' => true]);
 
-        if ($connection !== 'crdb') {
+        if (! in_array($connection, ['crdb', 'pgsql'], true)) {
             $this->expectException(RuntimeException::class);
             $this->expectExceptionMessage('jsonIndex');
         }
@@ -128,7 +128,7 @@ class SchemaMacrosTest extends TestCase
             ]);
         });
 
-        $expected = ['crdb' => 'from_driver', 'matrixone' => 'from_list', 'sqlite' => 'from_list'][$connection];
+        $expected = ['crdb' => 'from_driver', 'pgsql' => 'from_family', 'matrixone' => 'from_list', 'mysql' => 'from_list', 'sqlite' => 'from_list'][$connection];
         $this->assertSame(['id', $expected], Schema::connection($connection)->getColumnListing('portable_schema'));
 
         $result = Schema::connection($connection)->forDriver([

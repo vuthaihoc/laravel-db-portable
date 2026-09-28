@@ -8,7 +8,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Commands
 
-- `composer test` — PHPUnit. `Unit` needs no server; `Conformance` runs on SQLite, MatrixOne (127.0.0.1:6001, root/111) and CockroachDB (127.0.0.1:26258, `docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v26.2.6 start-single-node --insecure --store=type=mem,size=1GiB`); unreachable servers are skipped.
+- `composer test` — PHPUnit. `Unit` needs no server; `Conformance` runs on SQLite, MatrixOne (127.0.0.1:6001, root/111) CockroachDB (127.0.0.1:26258, `docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v26.2.6 start-single-node --insecure --store=type=mem,size=1GiB`), PostgreSQL (127.0.0.1:5433, postgres/secret, `postgres:17`) and MySQL (127.0.0.1:3307, root/secret, `mysql:8.4`); unreachable servers are skipped (`DB_PORTABLE_REQUIRE_SERVERS=1` fails instead).
 - `composer phpstan` (level 8), `composer cs` / `composer cs:fix` (Pint).
 - Dev dependencies `vuthaihoc/laravel-matrixone` (`^1.2`) and `vuthaihoc/cockroachdb-laravel` (`^2.5`) come from Packagist; their sources live in `../laravel-matrixone` and `../crdb2025`.
 
@@ -27,6 +27,6 @@ Guidance for Claude Code when working in this repository.
 
 ## Rules
 
-- Every macro or dialect change needs a conformance test that passes on all three databases.
+- Every macro or dialect change needs a conformance test that passes on every connection (SQLite, MatrixOne, CockroachDB, PostgreSQL, MySQL).
 - MatrixOne ignores a DESC key that follows a boolean ORDER BY key: the MySQL dialect sorts `desc` nulls last with a plain `x desc`.
 - Code comments and docs in English.
