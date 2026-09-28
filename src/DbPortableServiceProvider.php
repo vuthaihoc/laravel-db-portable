@@ -5,6 +5,7 @@ namespace DbPortable;
 use DbPortable\Console\AuditCommand;
 use DbPortable\Console\CopyCommand;
 use DbPortable\Console\ScanCommand;
+use DbPortable\Console\SearchIndexesCommand;
 use DbPortable\Dialects\Dialect;
 use DbPortable\Query\AnalyticsMacros;
 use DbPortable\Query\HistoricalReadMacros;
@@ -32,7 +33,7 @@ class DbPortableServiceProvider extends ServiceProvider
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
-            $this->commands([ScanCommand::class, AuditCommand::class, CopyCommand::class]);
+            $this->commands([ScanCommand::class, AuditCommand::class, CopyCommand::class, SearchIndexesCommand::class]);
         }
     }
 

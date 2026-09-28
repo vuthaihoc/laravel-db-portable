@@ -208,6 +208,30 @@ Skipped features and dropped conditions log a warning (or throw with `db-portabl
 
 The `where` condition of `partialIndex()` is raw SQL: keep it portable (`deleted_at is null`, `status = 'active'`).
 
+## Search indexes for Scout models
+
+`db-portable:search-indexes` reads the Scout attributes of your models and checks that their tables have the indexes the database engines need (`SCOUT_DRIVER=database`, `crdb` or `matrixone`), or writes a migration creating them:
+
+```bash
+php artisan db-portable:search-indexes                          # the Searchable models of app/Models
+php artisan db-portable:search-indexes "App\Models\Post" --migration
+php artisan db-portable:search-indexes --like                   # also the LIKE columns
+```
+
+| Declared on `toSearchableArray()` | CockroachDB / PostgreSQL | MatrixOne | MySQL | SQLite |
+|---|---|---|---|---|
+| `#[SearchUsingFullText(cols, ['language' => ...])]` | `fullText(cols)->language(...)`, matching `whereFullText()` | `fullText(cols)`: **required**, `MATCH` fails without it | `fullText(cols)` | none |
+| `#[SearchUsingFuzzy(cols, unaccent: ...)]` ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.4) | `trigramIndex(col, unaccent: ...)` | none (no trigram similarity) | none | none |
+| `#[SearchUsingPrefix(cols)]` | `trigramIndex(col)` (serves `ilike 'x%'`) | `index(col)` | `index(col)` | `index(col)` |
+| other columns, with `--like` | `trigramIndex(col)` | none (`LIKE '%x%'` cannot use an index) | none | none |
+| `toSearchableEmbedding()` | `vectorIndex(embedding)` | `vectorIndex(embedding)` | none | none |
+
+- Without `--migration` the command lists every index as `ok`, `missing`, `outdated` or `skipped` (with the reason) and fails when one is missing: usable as a CI check.
+- Existing indexes are recognized by their definition, whatever their name (e.g. a hand-written `using gin (word gin_trgm_ops)`).
+- `outdated`: a CockroachDB full-text index made before cockroachdb-laravel 2.3 (no `coalesce()`) or with another language; the migration drops it first.
+- MatrixOne: a table with its own foreign keys or a column already in another FULLTEXT index is reported instead of migrated (4.2.4 crashes on inserts into a table with both a FULLTEXT index and a foreign key; one FULLTEXT index per column).
+- The migration is a regular file in `database/migrations` (or `--path`), with `down()`: review and commit it.
+
 ## Switching databases
 
 A suggested workflow, e.g. from CockroachDB (`crdb`) to MatrixOne (`matrixone`):

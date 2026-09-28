@@ -29,14 +29,16 @@
     "require-dev": {
         "larastan/larastan": "^3.0",
         "laravel/pint": "^1.17",
+        "laravel/scout": "^11.8",
         "orchestra/testbench": "^10.0",
         "phpunit/phpunit": "^11.5",
-        "vuthaihoc/cockroachdb-laravel": "^2.3",
+        "vuthaihoc/cockroachdb-laravel": "^2.4",
         "vuthaihoc/laravel-matrixone": "^1.1"
     },
     "suggest": {
         "vuthaihoc/laravel-matrixone": "MatrixOne database driver",
-        "vuthaihoc/cockroachdb-laravel": "CockroachDB database driver"
+        "vuthaihoc/cockroachdb-laravel": "CockroachDB database driver",
+        "laravel/scout": "db-portable:search-indexes checks and migrates the indexes of Scout models"
     },
     "autoload": {
         "psr-4": {
