@@ -87,6 +87,11 @@ abstract class TestCase extends OrchestraTestCase
         self::$available[$connection] ??= self::createDatabase($connection);
 
         if (! self::$available[$connection]) {
+            // CI sets DB_PORTABLE_REQUIRE_SERVERS so a missing server fails instead of passing silently.
+            if (self::env('DB_PORTABLE_REQUIRE_SERVERS', '') !== '') {
+                $this->fail("The {$connection} server is not reachable.");
+            }
+
             $this->markTestSkipped("The {$connection} server is not reachable.");
         }
     }
