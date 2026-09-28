@@ -55,6 +55,9 @@
             "providers": [
                 "DbPortable\\DbPortableServiceProvider"
             ]
+        },
+        "branch-alias": {
+            "dev-master": "0.7.x-dev"
         }
     },
     "scripts": {

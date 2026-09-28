@@ -149,7 +149,21 @@ Post::select('*')->selectFullTextRelevance(['title', 'body'], $search)->get();
 | `whereSimilar()`, `orderBySimilarity()` | `%` and `similarity()` (driver) | `%` and `similarity()` (`pg_trgm`) | contains; score 1 prefix / 0.5 contains (warning) | same as MatrixOne | same as MatrixOne |
 | `searchFullText()`, `*FullTextRelevance()` | `ts_rank` (driver) | `ts_rank` | `match ... against` (driver) | `match ... against` | no `whereFullText()`; relevance 0 (warning) |
 
-The drivers ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.3+, [laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) 1.1+) implement these methods themselves; the macros cover the other databases. MatrixOne has no typo-tolerant search: its `ngram` parser splits only CJK text into n-grams. The trigram threshold of `%` is the session's `pg_trgm.similarity_threshold` (0.3): set it with the connection's `variables` option on CockroachDB.
+The drivers ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.3+, [laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) 1.1+) implement these methods themselves; the macros cover the other databases.
+
+#### Contracts
+
+A query builder that implements these methods itself declares it with the interfaces of `DbPortable\Contracts`, and the macros of the same names then never run on it:
+
+| Interface | Methods | Implemented by |
+|---|---|---|
+| `HistoricalReads` | `readStale()`, `asOfTime()`, `readCurrent()` | cockroachdb-laravel, laravel-matrixone |
+| `SearchBox` | `whereStartsWith()`, `whereContains()`, `suggest()`, `searchFullText()`, `selectFullTextRelevance()`, `orderByFullTextRelevance()` | cockroachdb-laravel, laravel-matrixone |
+| `SimilaritySearch` | `whereSimilar()`, `selectSimilarity()`, `orderBySimilarity()` | cockroachdb-laravel |
+
+```php
+if ($query instanceof \DbPortable\Contracts\HistoricalReads) { /* the driver compiles the historical read */ }
+``` MatrixOne has no typo-tolerant search: its `ngram` parser splits only CJK text into n-grams. The trigram threshold of `%` is the session's `pg_trgm.similarity_threshold` (0.3): set it with the connection's `variables` option on CockroachDB.
 
 ## Migrations
 
