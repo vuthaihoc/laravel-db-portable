@@ -103,7 +103,7 @@ final class IndexCompiler
         $expression = $this->grammar->wrap($column);
 
         if ($command->get('unaccent')) {
-            if ($this->connection->getDriverName() === 'crdb') {
+            if (Family::isCockroachDb($this->connection)) {
                 $expression = "unaccent(lower({$expression}))";
             } elseif (Family::of($this->connection) === Family::POSTGRES) {
                 Unsupported::skip("trigramIndex('{$column}', unaccent: true) on {$this->connection->getDriverName()}: unaccent() is not immutable on PostgreSQL, the index is on the column.");

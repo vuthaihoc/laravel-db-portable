@@ -29,7 +29,7 @@ final class SchemaMacros
             /** @var Connection $connection */
             $connection = (fn () => $this->connection)->call($this);
 
-            if ($connection->getDriverName() === 'crdb') {
+            if (Family::isCockroachDb($connection)) {
                 return $this->index($column, $name, 'gin');   // json is jsonb on CockroachDB
             }
 

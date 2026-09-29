@@ -4,6 +4,7 @@ namespace DbPortable\Console;
 
 use DbPortable\Scan\Finding;
 use DbPortable\Scan\Scanner;
+use DbPortable\Schema\Family;
 use Illuminate\Console\Command;
 
 class ScanCommand extends Command
@@ -24,7 +25,7 @@ class ScanCommand extends Command
         $targets = array_values(array_filter((array) $this->option('target'), 'is_string'));
 
         foreach ($targets as $target) {
-            if (! in_array($target, ['mysql', 'matrixone', 'pgsql', 'sqlite'], true)) {
+            if (! in_array($target, [Family::MYSQL, Family::MATRIXONE, Family::POSTGRES, Family::SQLITE], true)) {
                 $this->components->error("Unknown target [{$target}]: use mysql, matrixone, pgsql or sqlite.");
 
                 return self::FAILURE;

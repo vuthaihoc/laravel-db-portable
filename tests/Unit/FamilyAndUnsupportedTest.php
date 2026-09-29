@@ -5,9 +5,12 @@ namespace DbPortable\Tests\Unit;
 use DbPortable\Schema\Family;
 use DbPortable\Schema\Unsupported;
 use DbPortable\Tests\TestCase;
+use Illuminate\Database\MySqlConnection;
 use Illuminate\Database\PostgresConnection;
 use Illuminate\Database\Schema\Grammars\PostgresGrammar;
 use Illuminate\Support\Facades\Log;
+use MatrixOne\MatrixOneConnection;
+use YlsIdeas\CockroachDb\CockroachDbConnection;
 
 class FamilyAndUnsupportedTest extends TestCase
 {
@@ -27,6 +30,30 @@ class FamilyAndUnsupportedTest extends TestCase
 
         $this->assertSame(Family::POSTGRES, Family::of($connection));
         $this->assertInstanceOf(PostgresGrammar::class, $connection->getSchemaGrammar());
+    }
+
+    public function test_the_drivers_are_recognized_by_their_connection_class(): void
+    {
+        // Registered under other names than "crdb" and "matrixone".
+        $crdb = new CockroachDbConnection(fn () => null, 'app', '', ['driver' => 'cockroach']);
+        $matrixOne = new MatrixOneConnection(fn () => null, 'app', '', ['driver' => 'mo']);
+        $postgres = new PostgresConnection(fn () => null, 'app', '', ['driver' => 'pgsql']);
+        $mysql = new MySqlConnection(fn () => null, 'app', '', ['driver' => 'mysql']);
+
+        $this->assertSame([Family::CRDB, Family::MATRIXONE, 'pgsql', 'mysql'], array_map(Family::driver(...), [$crdb, $matrixOne, $postgres, $mysql]));
+        $this->assertTrue(Family::isCockroachDb($crdb));
+        $this->assertFalse(Family::isCockroachDb($postgres));
+        $this->assertTrue(Family::isMatrixOne($matrixOne));
+        $this->assertFalse(Family::isMatrixOne($mysql));
+        $this->assertTrue(Family::isMatrixOneGrammar($matrixOne->getQueryGrammar()));
+        $this->assertFalse(Family::isMatrixOneGrammar($mysql->getQueryGrammar()));
+
+        $callbacks = ['crdb' => 'driver', 'matrixone' => 'matrixone', 'pgsql' => 'family', 'default' => 'default'];
+        $this->assertSame(['driver', 'matrixone', 'family', 'default'], array_map(fn ($connection) => Family::pick($connection, $callbacks), [$crdb, $matrixOne, $postgres, $mysql]));
+
+        // CockroachDB has no ROLLUP: the union of grouping levels, as for "crdb".
+        $this->assertStringNotContainsString('rollup', $crdb->table('orders')->select('region')->selectRaw('count(*) as n')->groupBy('region')->rollup()->toSql());
+        $this->assertStringContainsString('rollup ("region")', $postgres->table('orders')->select('region')->selectRaw('count(*) as n')->groupBy('region')->rollup()->toSql());
     }
 
     public function test_a_warning_is_logged_once_per_message(): void

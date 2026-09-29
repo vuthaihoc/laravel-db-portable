@@ -104,7 +104,7 @@ final class AnalyticsMacros
             return $query;
         }
 
-        if ($family === Family::POSTGRES && $connection->getDriverName() !== 'crdb') {
+        if ($family === Family::POSTGRES && ! Family::isCockroachDb($connection)) {
             $query->groups = [new Expression('rollup ('.$columns.')')];
 
             return $query;

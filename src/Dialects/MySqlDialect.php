@@ -2,6 +2,8 @@
 
 namespace DbPortable\Dialects;
 
+use DbPortable\Schema\Family;
+
 /**
  * MySQL, MariaDB and MatrixOne.
  */
@@ -53,6 +55,6 @@ class MySqlDialect extends Dialect
 
     protected function isMatrixOne(): bool
     {
-        return str_starts_with($this->grammar::class, 'MatrixOne\\');
+        return Family::isMatrixOneGrammar($this->grammar);
     }
 }

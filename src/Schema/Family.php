@@ -3,6 +3,7 @@
 namespace DbPortable\Schema;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\Query\Grammars\Grammar as QueryGrammar;
 use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Database\Schema\Grammars\MySqlGrammar;
 use Illuminate\Database\Schema\Grammars\PostgresGrammar;
@@ -19,6 +20,22 @@ final class Family
     public const MYSQL = 'mysql';
 
     public const SQLITE = 'sqlite';
+
+    /** Driver names of vuthaihoc/cockroachdb-laravel and vuthaihoc/laravel-matrixone. */
+    public const CRDB = 'crdb';
+
+    public const MATRIXONE = 'matrixone';
+
+    /**
+     * The drivers' connection classes, so a driver registered under another name
+     * (e.g. "cockroach") is still recognized. Strings: the drivers are optional.
+     */
+    private const CONNECTIONS = [
+        self::CRDB => 'YlsIdeas\CockroachDb\CockroachDbConnection',
+        self::MATRIXONE => 'MatrixOne\MatrixOneConnection',
+    ];
+
+    private const MATRIXONE_QUERY_GRAMMAR = 'MatrixOne\Query\Grammar';
 
     public static function of(Connection $connection): ?string
     {
@@ -39,9 +56,37 @@ final class Family
         };
     }
 
+    /**
+     * The connection's driver: "crdb" or "matrixone" for the drivers' connections, whatever
+     * name they are registered under, else the configured driver name.
+     */
+    public static function driver(Connection $connection): string
+    {
+        foreach (self::CONNECTIONS as $driver => $class) {
+            if (is_a($connection, $class)) {
+                return $driver;
+            }
+        }
+
+        return $connection->getDriverName();
+    }
+
+    public static function isCockroachDb(Connection $connection): bool
+    {
+        return self::driver($connection) === self::CRDB;
+    }
+
     public static function isMatrixOne(Connection $connection): bool
     {
-        return $connection->getDriverName() === 'matrixone';
+        return self::driver($connection) === self::MATRIXONE;
+    }
+
+    /**
+     * For code that only has the query grammar (the dialects).
+     */
+    public static function isMatrixOneGrammar(QueryGrammar $grammar): bool
+    {
+        return is_a($grammar, self::MATRIXONE_QUERY_GRAMMAR);
     }
 
     /**
@@ -64,6 +109,6 @@ final class Family
             }
         }
 
-        return $keys[$connection->getDriverName()] ?? $keys[self::of($connection) ?? ''] ?? $keys['default'] ?? null;
+        return $keys[self::driver($connection)] ?? $keys[self::of($connection) ?? ''] ?? $keys['default'] ?? null;
     }
 }

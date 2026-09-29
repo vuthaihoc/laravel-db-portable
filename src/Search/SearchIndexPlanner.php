@@ -87,7 +87,7 @@ final class SearchIndexPlanner
 
         switch (Family::of($connection)) {
             case Family::POSTGRES:
-                $crdb = $connection->getDriverName() === 'crdb';
+                $crdb = Family::isCockroachDb($connection);
                 $language = $options['language'] ?? ($crdb ? $connection->getConfig('fulltext_language') : null) ?: 'english';
                 $language = is_string($language) ? $language : 'english';
                 $up = "\$table->fullText({$list})->language('{$language}');";
