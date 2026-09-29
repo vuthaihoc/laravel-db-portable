@@ -25,6 +25,7 @@ Guidance for Claude Code when working in this repository.
 - `src/Schema/` — Blueprint macros (`jsonIndex`, `jsonWithDefault`, `descIndex`, `forDriver`, and `jsonKeyIndex`, `coveringIndex`, `trigramIndex`, `partialIndex`, which add a `portableIndex` command compiled by the `compilePortableIndex` schema grammar macro through `IndexCompiler`) and `Schema::forDriver()`; `Family` resolves a connection's family from its schema grammar, `Unsupported::skip()` logs (or throws with `db-portable.strict`).
 - `src/Scan/` — token-based scanner of PHP string literals; `Rule::defaults()` lists the constructs and the families they break on (`mysql`, `matrixone`, `pgsql`, `sqlite`). Weak patterns (`sqlOnly`) only match literals that look like SQL or are the first argument of a raw SQL method.
 - `src/Audit/Auditor.php`, `src/Copy/Copier.php` — the audit and copy logic behind the commands.
+- `docs/plans/parallel-databases.md`, `docs/mirrors.md` — the planned mirrors (owner → mirror tables through a queue, `#[MirroredAs]`, `MirrorModel`, `mirror:*` commands) and native change capture; not implemented yet. Keep the two documents in sync with each other.
 
 ## Rules
 

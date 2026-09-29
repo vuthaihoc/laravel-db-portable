@@ -315,6 +315,15 @@ php artisan db-portable:copy --from=crdb --to=matrixone --resume       # continu
 - Moves the sequences of serial and identity columns on a PostgreSQL or CockroachDB target past the copied keys, so the next insert does not collide.
 - Rows are inserted with `insertOrIgnore()`, so a rerun does not duplicate them. Rows the target ignores (duplicates, values it rejects) are reported as `skipped`, and a table whose target ends with fewer rows than the source is reported as `incomplete`; the command then fails, like for a failed table (reported with the rows copied before the error).
 
+## Parallel databases (design preview)
+
+Planned: keep **mirrors** of chosen tables in other databases (MatrixOne for analytics, XTDB for history, a second
+PostgreSQL for reporting), synchronised through the queue like Laravel Scout, and read them with Eloquent models and
+relations: `#[MirroredAs]`, `Order::mirror('analytics')->with('customer')->...`, and `mirror:schema`, `mirror:data`,
+`mirror:stats` commands. Nothing is implemented yet; see [docs/mirrors.md](docs/mirrors.md) for the API and
+[docs/plans/parallel-databases.md](docs/plans/parallel-databases.md) for the plan (sync engines, native change
+capture per database pair, phases).
+
 ## Testing
 
 ```bash
