@@ -315,12 +315,23 @@ php artisan db-portable:copy --from=crdb --to=matrixone --resume       # continu
 - Moves the sequences of serial and identity columns on a PostgreSQL or CockroachDB target past the copied keys, so the next insert does not collide.
 - Rows are inserted with `insertOrIgnore()`, so a rerun does not duplicate them. Rows the target ignores (duplicates, values it rejects) are reported as `skipped`, and a table whose target ends with fewer rows than the source is reported as `incomplete`; the command then fails, like for a failed table (reported with the rows copied before the error).
 
-## Parallel databases (design preview)
+## Mirrors: databases in parallel (in progress)
 
-Planned: keep **mirrors** of chosen tables in other databases (MatrixOne for analytics, XTDB for history, a second
-PostgreSQL for reporting), synchronised through the queue like Laravel Scout, and read them with Eloquent models:
-`#[MirroredAs]` on the owner models, mirror models with ordinary relations (`Analytics\Order::with('customer')->...`),
-and the `mirror:schema`, `mirror:data`, `mirror:stats` commands. Nothing is implemented yet; see
+Keep **mirrors** of chosen tables in other databases (MatrixOne for analytics, a second PostgreSQL for reporting, XTDB
+for history), synchronised through the queue like Laravel Scout, and read them with Eloquent models:
+
+```php
+#[MirroredAs('analytics', Analytics\Order::class)]      // config: 'mirrors' => ['analytics' => ['connection' => 'matrixone']]
+class Order extends Model
+{
+    use Mirrored;
+}
+
+Analytics\Order::with('customer')->where('status', 'paid')->latest()->paginate(20);   // customers from the owner
+```
+
+Implemented: owner and mirror models and the queue engine, on every pair of SQLite, PostgreSQL, MySQL, CockroachDB
+and MatrixOne. Coming: the `mirror:schema`, `mirror:data`, `mirror:stats` commands and XTDB history mirrors. See
 [docs/mirrors.md](docs/mirrors.md) for the API and [docs/plans/parallel-databases.md](docs/plans/parallel-databases.md)
 for the plan (sync engines, native change capture per database pair, phases).
 

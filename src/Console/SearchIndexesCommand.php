@@ -4,10 +4,10 @@ namespace DbPortable\Console;
 
 use DbPortable\Search\SearchIndex;
 use DbPortable\Search\SearchIndexPlanner;
+use DbPortable\Support\ModelDiscovery;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
-use Symfony\Component\Finder\SplFileInfo;
 
 class SearchIndexesCommand extends Command
 {
@@ -24,7 +24,7 @@ class SearchIndexesCommand extends Command
     public function handle(SearchIndexPlanner $planner, Filesystem $files): int
     {
         $models = array_values(array_filter((array) $this->argument('models'), 'is_string'));
-        $models = $models === [] ? $this->discover($files) : $models;
+        $models = $models === [] ? $this->discover() : $models;
 
         if ($models === []) {
             $this->components->warn('No searchable model found.');
@@ -167,30 +167,11 @@ class SearchIndexesCommand extends Command
      *
      * @return list<class-string<Model>>
      */
-    private function discover(Filesystem $files): array
+    private function discover(): array
     {
-        $directory = app_path('Models');
-
-        if (! is_dir($directory)) {
-            return [];
-        }
-
-        $namespace = app()->getNamespace().'Models\\';
-        $models = [];
-
-        /** @var SplFileInfo $file */
-        foreach ($files->allFiles($directory) as $file) {
-            $class = $namespace.str_replace(['/', '.php'], ['\\', ''], $file->getRelativePathname());
-
-            if (class_exists($class) && is_subclass_of($class, Model::class)
-                && in_array('Laravel\Scout\Searchable', class_uses_recursive($class), true)
-                && ! (new \ReflectionClass($class))->isAbstract()) {
-                $models[] = $class;
-            }
-        }
-
-        sort($models);
-
-        return $models;
+        return array_values(array_filter(
+            ModelDiscovery::appModels(),
+            fn (string $class) => in_array('Laravel\Scout\Searchable', class_uses_recursive($class), true),
+        ));
     }
 }

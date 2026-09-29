@@ -10,3 +10,6 @@ parameters:
         -
             identifier: method.notFound
             message: '#Illuminate\\Database\\(Query|Eloquent)\\Builder.*::(whereJsonNumber|incrementJson|sumJson|avgJson|minJson|maxJson|selectAggregateWhere|orderByFullTextRelevance)\(\)#'
+        # Library traits (Mirror\Mirrored) are used by applications, not by the package.
+        -
+            identifier: trait.unused

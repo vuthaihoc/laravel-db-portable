@@ -7,6 +7,9 @@ use DbPortable\Console\CopyCommand;
 use DbPortable\Console\ScanCommand;
 use DbPortable\Console\SearchIndexesCommand;
 use DbPortable\Dialects\Dialect;
+use DbPortable\Mirror\MirrorRegistry;
+use DbPortable\Mirror\MirrorSync;
+use DbPortable\Mirror\MirrorWriter;
 use DbPortable\Query\AnalyticsMacros;
 use DbPortable\Query\HistoricalReadMacros;
 use DbPortable\Query\SearchMacros;
@@ -23,7 +26,14 @@ class DbPortableServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->mergeConfigFrom(__DIR__.'/../config/db-portable.php', 'db-portable');
+
+        $this->app->singleton(MirrorRegistry::class);
+        $this->app->singleton(MirrorWriter::class);
+        $this->app->singleton(MirrorSync::class);
+
         static::registerQueryMacros();
+        static::registerMirrorMacros();
         SchemaMacros::register();
         AnalyticsMacros::register();
         HistoricalReadMacros::register();
@@ -33,6 +43,7 @@ class DbPortableServiceProvider extends ServiceProvider
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
+            $this->publishes([__DIR__.'/../config/db-portable.php' => config_path('db-portable.php')], 'db-portable-config');
             $this->commands([ScanCommand::class, AuditCommand::class, CopyCommand::class, SearchIndexesCommand::class]);
         }
     }
@@ -121,6 +132,23 @@ class DbPortableServiceProvider extends ServiceProvider
         EloquentBuilder::macro('decrementJson', function (string $path, int|float $amount = 1, array $extra = []) {
             /** @var EloquentBuilder<Model> $this */
             return $this->incrementJson($path, -$amount, $extra);
+        });
+    }
+
+    /**
+     * mirrorable() / unmirrorable() on queries of owner models (see Mirror\Mirrored): queue
+     * the rows for their mirrors, after writes that bypass Eloquent events, or remove them.
+     */
+    public static function registerMirrorMacros(): void
+    {
+        EloquentBuilder::macro('mirrorable', function (?int $chunk = null): void {
+            /** @var EloquentBuilder<Model> $this */
+            app(MirrorSync::class)->queue($this, false, $chunk);
+        });
+
+        EloquentBuilder::macro('unmirrorable', function (?int $chunk = null): void {
+            /** @var EloquentBuilder<Model> $this */
+            app(MirrorSync::class)->queue($this, true, $chunk);
         });
     }
 }

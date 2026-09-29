@@ -2,9 +2,7 @@
 
 namespace DbPortable\Copy;
 
-use DateTimeImmutable;
-use DateTimeInterface;
-use DateTimeZone;
+use DbPortable\Support\ValueMapper;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Grammars\MySqlGrammar;
 use Illuminate\Database\Query\Grammars\PostgresGrammar;
@@ -205,30 +203,7 @@ class Copier
      */
     protected function normalize(array $row, array $types): array
     {
-        $grammar = $this->target()->getQueryGrammar();
-        $mysqlLike = $grammar instanceof MySqlGrammar;
-
-        foreach ($row as $column => $value) {
-            $type = $types[$column] ?? '';
-
-            if (is_array($value) || is_object($value) && ! $value instanceof DateTimeInterface) {
-                $row[$column] = json_encode($value, JSON_UNESCAPED_UNICODE);
-            } elseif (in_array($type, ['bool', 'boolean'], true) && $value !== null) {
-                $row[$column] = $grammar instanceof PostgresGrammar ? (bool) $value : (int) (bool) $value;
-            } elseif (is_bool($value)) {
-                $row[$column] = $grammar instanceof PostgresGrammar ? $value : (int) $value;
-            } elseif ($mysqlLike && is_string($value) && $this->hasTimeZoneOffset($value)) {
-                // MySQL-family datetime columns take no offset: store the instant in UTC.
-                $row[$column] = (new DateTimeImmutable($value))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.u');
-            }
-        }
-
-        return $row;
-    }
-
-    protected function hasTimeZoneOffset(string $value): bool
-    {
-        return (bool) preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}(:?\d{2})?|Z)$/', $value);
+        return (new ValueMapper($this->target()))->row($row, $types);
     }
 
     /**

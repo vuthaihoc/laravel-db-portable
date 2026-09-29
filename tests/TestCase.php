@@ -11,7 +11,7 @@ use Throwable;
 use YlsIdeas\CockroachDb\CockroachDbServiceProvider;
 
 /**
- * Connections: sqlite (in memory), matrixone, crdb, pgsql (PostgreSQL) and mysql.
+ * Connections: sqlite and sqlite_mirror (in memory), matrixone, crdb, pgsql (PostgreSQL) and mysql.
  * Server connections are skipped when unreachable; their test database is
  * created on first use.
  */
@@ -42,6 +42,12 @@ abstract class TestCase extends OrchestraTestCase
             'database' => ':memory:',
             'prefix' => '',
             'foreign_key_constraints' => true,
+        ]);
+        // A second SQLite database, for mirrors.
+        $app['config']->set('database.connections.sqlite_mirror', [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'prefix' => '',
         ]);
         $app['config']->set('database.connections.matrixone', [
             'driver' => 'matrixone',
@@ -111,7 +117,7 @@ abstract class TestCase extends OrchestraTestCase
      */
     protected function requireConnection(string $connection): void
     {
-        if ($connection === 'sqlite') {
+        if (str_starts_with($connection, 'sqlite')) {
             return;
         }
 
