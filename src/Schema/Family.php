@@ -10,8 +10,9 @@ use Illuminate\Database\Schema\Grammars\PostgresGrammar;
 use Illuminate\Database\Schema\Grammars\SQLiteGrammar;
 
 /**
- * The database family of a connection: pgsql (PostgreSQL, CockroachDB),
- * mysql (MySQL, MariaDB, MatrixOne) or sqlite.
+ * The database family of a connection: pgsql (PostgreSQL, CockroachDB, and
+ * XTDB over its PostgreSQL wire protocol), mysql (MySQL, MariaDB, MatrixOne)
+ * or sqlite.
  */
 final class Family
 {
@@ -21,10 +22,17 @@ final class Family
 
     public const SQLITE = 'sqlite';
 
-    /** Driver names of vuthaihoc/cockroachdb-laravel and vuthaihoc/laravel-matrixone. */
+    /** Driver names of vuthaihoc/cockroachdb-laravel, vuthaihoc/laravel-matrixone and vuthaihoc/laravel-xtdb2. */
     public const CRDB = 'crdb';
 
     public const MATRIXONE = 'matrixone';
+
+    /**
+     * Experimental: XTDB 2.2 is not released yet, so no macro is adapted to XTDB and
+     * the conformance suite does not run on it. XTDB's grammars extend PostgreSQL's,
+     * so the macros compile the PostgreSQL SQL, which XTDB does not always accept.
+     */
+    public const XTDB = 'xtdb';
 
     /**
      * The drivers' connection classes, so a driver registered under another name
@@ -33,6 +41,7 @@ final class Family
     private const CONNECTIONS = [
         self::CRDB => 'YlsIdeas\CockroachDb\CockroachDbConnection',
         self::MATRIXONE => 'MatrixOne\MatrixOneConnection',
+        self::XTDB => 'LaravelXtdb\XtdbConnection',
     ];
 
     private const MATRIXONE_QUERY_GRAMMAR = 'MatrixOne\Query\Grammar';
@@ -79,6 +88,14 @@ final class Family
     public static function isMatrixOne(Connection $connection): bool
     {
         return self::driver($connection) === self::MATRIXONE;
+    }
+
+    /**
+     * Experimental, see XTDB.
+     */
+    public static function isXtdb(Connection $connection): bool
+    {
+        return self::driver($connection) === self::XTDB;
     }
 
     /**

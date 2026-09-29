@@ -163,7 +163,17 @@ A query builder that implements these methods itself declares it with the interf
 
 ```php
 if ($query instanceof \DbPortable\Contracts\HistoricalReads) { /* the driver compiles the historical read */ }
-``` MatrixOne has no typo-tolerant search: its `ngram` parser splits only CJK text into n-grams. The trigram threshold of `%` is the session's `pg_trgm.similarity_threshold` (0.3): set it with the connection's `variables` option on CockroachDB.
+```
+
+[laravel-xtdb2](https://github.com/vuthaihoc/laravel-xtdb2) implements `HistoricalReads` (`asOfTime()` reads at an XTDB
+system time) and `SearchBox`.
+
+#### XTDB (experimental)
+
+`Family::isXtdb()` recognizes laravel-xtdb2's connections (`Family::driver()` returns `xtdb`, and `forDriver()`
+accepts an `xtdb` key). Until XTDB 2.2 is released, nothing else is adapted to XTDB and the conformance suite does
+not run on it: XTDB's grammars extend PostgreSQL's, so the other macros compile PostgreSQL SQL, which XTDB does not
+always accept (e.g. `incrementJson()` uses `jsonb_set()`). MatrixOne has no typo-tolerant search: its `ngram` parser splits only CJK text into n-grams. The trigram threshold of `%` is the session's `pg_trgm.similarity_threshold` (0.3): set it with the connection's `variables` option on CockroachDB.
 
 ## Migrations
 

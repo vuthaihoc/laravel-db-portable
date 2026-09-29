@@ -9,6 +9,7 @@ use Illuminate\Database\MySqlConnection;
 use Illuminate\Database\PostgresConnection;
 use Illuminate\Database\Schema\Grammars\PostgresGrammar;
 use Illuminate\Support\Facades\Log;
+use LaravelXtdb\XtdbConnection;
 use MatrixOne\MatrixOneConnection;
 use YlsIdeas\CockroachDb\CockroachDbConnection;
 
@@ -54,6 +55,21 @@ class FamilyAndUnsupportedTest extends TestCase
         // CockroachDB has no ROLLUP: the union of grouping levels, as for "crdb".
         $this->assertStringNotContainsString('rollup', $crdb->table('orders')->select('region')->selectRaw('count(*) as n')->groupBy('region')->rollup()->toSql());
         $this->assertStringContainsString('rollup ("region")', $postgres->table('orders')->select('region')->selectRaw('count(*) as n')->groupBy('region')->rollup()->toSql());
+    }
+
+    public function test_xtdb_is_recognized_by_its_connection_class(): void
+    {
+        if (! class_exists(XtdbConnection::class)) {
+            require_once __DIR__.'/../Stubs/XtdbConnection.php';
+        }
+
+        $xtdb = new XtdbConnection(fn () => null, 'xtdb', '', ['driver' => 'xtdb']);
+
+        $this->assertSame(Family::XTDB, Family::driver($xtdb));
+        $this->assertTrue(Family::isXtdb($xtdb));
+        $this->assertSame(Family::POSTGRES, Family::of($xtdb));
+        $this->assertFalse(Family::isXtdb(new PostgresConnection(fn () => null, 'app', '', ['driver' => 'pgsql'])));
+        $this->assertSame('xtdb', Family::pick($xtdb, ['xtdb' => 'xtdb', 'pgsql' => 'pgsql']));
     }
 
     public function test_a_warning_is_logged_once_per_message(): void
