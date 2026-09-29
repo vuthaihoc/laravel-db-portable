@@ -11,7 +11,7 @@ Eloquent-friendly code:
 - keep writing to the database the application already uses (PostgreSQL, MySQL, CockroachDB...);
 - keep **mirrors** of chosen tables in other databases: MatrixOne for analytics, full-text and vector search,
   XTDB for bitemporal history and audit, a second PostgreSQL for reporting...;
-- query a mirror with the same models: `Order::mirror('analytics')->timeWindow(...)`, `$order->mirror('history')->versions()`;
+- query a mirror with its own Eloquent models: `Analytics\Order::timeWindow(...)`, `History\Order::whereKey($id)->history()`;
 - declare and supervise the native change-data-capture and replication features of the databases (MatrixOne
   `CREATE CDC`, CockroachDB changefeeds, PostgreSQL logical replication, XTDB external sources) from Laravel;
 - as a consequence, migrate between databases **online**: copy, keep in sync, verify, cut over.
@@ -33,8 +33,8 @@ API on the other side. Scout does this for search engines; this plan does it for
    correct: writes are upserts keyed by the primary key and guarded by a version (the owner's `updated_at` or a
    sequence), deletes are tombstones. XTDB targets use the version as valid time, so history is right whatever the
    arrival order.
-5. **Explicit over magic.** Nothing routes queries to a mirror implicitly. `->mirror('analytics')` says where a query
-   runs.
+5. **Explicit over magic.** Nothing routes queries to a mirror implicitly: a query runs on a mirror because it uses
+   a mirror model (`Analytics\Order`), and a relation reads where its target model lives.
 6. **Ops features are declarative and dry-runnable.** Creating a CDC task or a replication stream prints the SQL
    first (`--dry-run`), checks prerequisites (PITR, `wal_level`, rangefeeds), stores the declaration, and can show
    status and drop it. Credentials never reach logs.
@@ -73,22 +73,22 @@ What a mirror brings, whoever the owner:
 
 | Mirror | Capabilities to borrow | Query examples |
 |---|---|---|
-| PostgreSQL | extensions (PostGIS, pgvector, pg_trgm), `ts_rank` full-text, reporting replica | `Place::mirror('geo')->whereRaw('ST_DWithin(...)')` |
-| MySQL / MariaDB | a copy for MySQL-based BI and legacy tools | `Order::mirror('bi')->...` |
-| CockroachDB | geo-distributed reads (follower reads), `AS OF SYSTEM TIME`, trigram and `ts_rank` search, Scout `crdb` engine | `Order::mirror('global')->readStale()->...` |
-| MatrixOne | analytics (`timeWindow()`, `sample()`, `rollup()`), full-text (ngram, BM25), vector search, Scout `matrixone` engines, snapshots / PITR | `Order::mirror('analytics')->timeWindow('created_at', '1 hour')->...` |
-| XTDB 2.2 | bitemporal history, as-of reads, audit trail, `erase()` | `$order->mirror('history')->versions()`, `Order::mirror('history')->asOfValidTime($date)` |
-| SQLite | local or offline copy, tests | `Order::mirror('local')->...` |
+| PostgreSQL | extensions (PostGIS, pgvector, pg_trgm), `ts_rank` full-text, reporting replica | `Geo\Place::whereRaw('ST_DWithin(...)')` |
+| MySQL / MariaDB | a copy for MySQL-based BI and legacy tools | `Bi\Order::...` |
+| CockroachDB | geo-distributed reads (follower reads), `AS OF SYSTEM TIME`, trigram and `ts_rank` search, Scout `crdb` engine | `Global\Order::readStale()->...` |
+| MatrixOne | analytics (`timeWindow()`, `sample()`, `rollup()`), full-text (ngram, BM25), vector search, Scout `matrixone` engines, snapshots / PITR | `Analytics\Order::timeWindow('created_at', '1 hour')->...` |
+| XTDB 2.2 | bitemporal history, as-of reads, audit trail, `erase()` | `History\Order::whereKey($id)->history()`, `History\Order::asOfValidTime($date)` |
+| SQLite | local or offline copy, tests | `Local\Order::...` |
 
-Features every pair gets from db-portable: `Model::mirror()` reads, `fresh()` / `orOwner()`, `mirror:import`,
-`mirror:status`, `mirror:verify`, and the online migration workflow.
+Features every pair gets from db-portable: mirror models with relations, `mirror:schema`, `mirror:data`,
+`mirror:stats`, `mirror:sync`, `fresh()` / `orOwner()` (Phase 2), and the online migration workflow.
 
 ## Architecture
 
 ```
             writes                                     reads by capability
-  App ─────────────▶ Owner DB                 Order::mirror('analytics')->timeWindow(...)
-   │                  (pgsql/mysql/crdb)       $order->mirror('history')->versions()
+  App ─────────────▶ Owner DB                 Analytics\Order::timeWindow(...)
+   │                  (pgsql/mysql/crdb)       History\Order::whereKey($id)->history()
    │                     │                              │
    │ Eloquent events     │ native CDC                   ▼
    │ (afterCommit)       │ (changefeed, CDC task,   ┌─────────────┐
@@ -108,7 +108,7 @@ Features every pair gets from db-portable: `Model::mirror()` reads, `fresh()` / 
   ```php
   'mirrors' => [
       'analytics' => ['connection' => 'matrixone', 'engine' => 'queue', 'queue' => 'mirrors'],
-      'history'   => ['connection' => 'xtdb',      'engine' => 'queue', 'valid_time' => 'updated_at'],
+      'history'   => ['connection' => 'xtdb',      'engine' => 'queue', 'versions' => 'all', 'valid_time' => 'updated_at'],
       'reporting' => ['connection' => 'pgsql_reporting', 'engine' => 'native'],   // PG logical replication
   ],
   ```
@@ -117,9 +117,10 @@ Features every pair gets from db-portable: `Model::mirror()` reads, `fresh()` / 
   model that represents it in each mirror (see [Queue engine](#queue-engine-mirror-models-relations-and-commands)).
   Registers an observer (`saved`, `deleted`, `restored`, `forceDeleted`; after commit) that queues a `MirrorChanges`
   job; adds `mirrorable()` / `unmirrorable()` macros on the query builder for mass updates that bypass events (as
-  Scout's `searchable()`), and `Order::mirror($name)` for reads.
-- **`MirrorModel`**: the read-only Eloquent base class of mirror models, on the mirror's connection, with its own
-  relations (eager loading inside the mirror database) and optional `fromOwner()` / `mirrorSchema()` hooks.
+  Scout's `searchable()`).
+- **`MirrorModel`**: the read-only Eloquent base class of mirror models, on the mirror's connection, with ordinary
+  relations (to mirror models, read in the mirror; to owner models, read in the owner database) and optional
+  `fromOwner()` / `mirrorSchema()` hooks.
 
 - **Sync engines**
   - `queue` (Phase 1): observer + queue; immediate, portable to every pair; misses writes that bypass Eloquent.
@@ -135,10 +136,9 @@ Features every pair gets from db-portable: `Model::mirror()` reads, `fresh()` / 
   retries from the drivers (40001, w-w conflicts).
 - **Mirror state** (`db_portable_mirrors` table on the owner): per mirror and table, the applied watermark, lag,
   last error, counts. Feeds `mirror:status`, freshness waits and alerts.
-- **Query side**: `Order::mirror('analytics')` returns the builder of the mirror model declared with `#[MirroredAs]`
-  (a generic read-only model on the owner's table name when none is declared). Helpers: `->fresh()` waits until the
-  mirror's watermark passes the owner's latest version (bounded), `->orOwner()` falls back to the owner when the
-  mirror lags.
+- **Query side**: queries use the mirror models directly (`Analytics\Order::...`). Phase 2 helpers: `->fresh()` waits
+  until the mirror's watermark passes the owner's latest version (bounded), `->orOwner()` falls back to the owner when
+  the mirror lags.
 - **Commands**: `db-portable:mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync` (the three in order) and
   `mirror:flush` (see [Commands](#commands)); `db-portable:cdc {create|status|drop}` and
   `db-portable:replicate {create|status|drop}` for native features, all with `--dry-run`.
@@ -170,8 +170,7 @@ class Order extends Model
 ```
 
 A `mirroredAs(): array` method (`['analytics' => Analytics\Order::class]`) does the same when the mapping depends on
-configuration. `#[MirroredAs('reporting')]` without a class mirrors the table and reads it through a generic
-read-only model on the owner's table name.
+configuration. Every mirrored table has a mirror model class; it can be empty (`class Order extends MirrorModel {}`).
 
 The mirror model is a regular, read-only Eloquent model on the mirror's connection:
 
@@ -184,9 +183,9 @@ class Order extends MirrorModel            // the connection comes from the mirr
 {
     protected $table = 'orders';
 
-    // Relations to other mirror models run inside the mirror database.
-    public function customer(): BelongsTo { return $this->belongsTo(Customer::class); }   // Analytics\Customer
-    public function items(): HasMany { return $this->hasMany(OrderItem::class); }         // Analytics\OrderItem
+    // A relation to a mirror model is read in the mirror; one to an owner model, in the owner database.
+    public function items(): HasMany { return $this->hasMany(OrderItem::class); }                   // Analytics\OrderItem
+    public function customer(): BelongsTo { return $this->belongsTo(\App\Models\Customer::class); } // owner model
 
     // Optional: the row written for an owner model (default: $order->toMirrorArray('analytics')).
     public static function fromOwner(\App\Models\Order $order): array
@@ -207,32 +206,38 @@ class Order extends MirrorModel            // the connection comes from the mirr
   from the registry.
 - A history mirror model (XTDB) also uses laravel-xtdb2's `Bitemporal`: `History\Order::whereKey($id)->history()`.
 
-### Relations and eager loading
+### Relations
 
-| Relation declared on | Points to | `with()` (eager loading) | `whereHas()`, joins |
-|---|---|---|---|
-| a mirror model | a mirror model of the same mirror | yes, one query per relation in the mirror database | yes, in the mirror database |
-| a mirror model | an owner model | yes, Eloquent runs that query on the owner's connection | no: two databases (a clear error) |
-| an owner model | its mirror row: `hasMirror('analytics')` | yes: `Order::with('analytics')->get()` loads the mirror rows in one query | no |
-| an owner model | its versions: `hasMirrorHistory('history')` | yes: `Order::with('history')->get()` loads every XTDB version | no |
+Relations are declared on the mirror model, like on any Eloquent model; there is no owner-side API and no derived
+relations. The target decides where related rows are read:
 
-- `Order::mirror('analytics')` is `Analytics\Order::query()`, so
-  `Order::mirror('analytics')->with('customer', 'items')->timeWindow('created_at', '1 day')->get()` eager loads inside
-  MatrixOne.
-- For eager loading and joins inside a mirror, the related models must be mirrored there too; `mirror:stats` warns
-  when a mirror model's relation points to a mirror table that is empty or not declared.
+| Target of a mirror model's relation | `with()` (eager loading) | `whereHas()`, joins |
+|---|---|---|
+| a mirror model of the same mirror | in the mirror database | yes, in the mirror database |
+| an owner model | in the owner database: a second query by key | no (two databases): a clear error |
+
+- Laravel gives a related model without its own `$connection` the parent's connection
+  (`HasRelationships::newRelatedInstance()`), so an owner model related to a mirror model would be read from the
+  mirror database, silently (verified on Laravel 12.69). `MirrorModel` overrides `newRelatedInstance()`: only mirror
+  models share the mirror's connection; owner models keep the default (owner) connection. This needs a test in the
+  mirror conformance suite.
 - Mirror tables get no foreign keys (`mirror:schema` skips them): rows arrive out of order, so a child can land before
-  its parent.
-- `use MirrorsOwnerRelations` derives a mirror model's relations from the owner's (same names; related owner models
-  replaced by their mirror models in that mirror, or kept as owner models when they are not mirrored there), so
-  relations are not written twice; a relation declared on the mirror model wins over a derived one.
+  its parent. `mirror:stats` warns when a relation targets a mirror model whose table is missing or empty.
+- A related table does not have to be mirrored:
 
-### Queue payloads
+  | The related data is needed to | Do | Mirror it? |
+  |---|---|---|
+  | display it next to mirror results | relate the mirror model to the owner model | no |
+  | filter or group by a few of its fields | copy them into the mirrored row with `fromOwner()` | no |
+  | query it freely (joins, `whereHas()`, many columns) | mirror it and relate the mirror models | yes |
 
-- `fresh` (default): the job carries the key; the worker reads the owner row when it runs, so a burst of updates
-  collapses into one write (unique job per key) and the mirror gets the latest state.
-- `snapshot` (history mirrors): the job carries the attributes as committed, so every version reaches XTDB, stamped
-  with its `updated_at` as valid time.
+### Latest state or every version (`versions`)
+
+- `latest` (default): the job carries the model and its key; the worker reads the owner row when it runs, so a burst
+  of updates collapses into one write (unique job per key) and the mirror gets the current state.
+- `all` (history mirrors): the job carries a copy of the attributes as committed, so every version reaches XTDB,
+  valid from its `valid_time` column (`updated_at`). The values sit in the queue until the job runs: encrypted jobs
+  (`ShouldBeEncrypted`) when they carry personal data.
 - Jobs are dispatched after commit. Deletes carry the key (soft deletes their `deleted_at`); a force delete can
   `erase()` the row on a history mirror (configurable).
 
@@ -272,10 +277,10 @@ about its table, then compares what the two have in common:
 
 | Scenario | Owner | Mirror | Code |
 |---|---|---|---|
-| Dashboards without loading the OLTP database | PostgreSQL / MySQL / CockroachDB | MatrixOne (`analytics`) | `Order::mirror('analytics')->timeWindow('created_at', '1 hour')->selectSumWhere(...)` |
-| Audit trail and "as of" for any model | any | XTDB (`history`) | `$order->mirror('history')->versions()`, `Order::mirror('history')->asOfValidTime('2026-03-01')->get()` |
+| Dashboards without loading the OLTP database | PostgreSQL / MySQL / CockroachDB | MatrixOne (`analytics`) | `Analytics\Order::timeWindow('created_at', '1 hour')->select('_wstart')->selectSumWhere(...)` |
+| Audit trail and "as of" for any model | any | XTDB (`history`) | `History\Order::whereKey($id)->history()->get()`, `History\Order::asOfValidTime('2026-03-01')->get()` |
 | Search the owner cannot do well | MySQL | MatrixOne / CockroachDB | a Scout engine that searches the mirror (`SCOUT_DRIVER=mirror:analytics`) with the driver engines already in crdb2025 / laravel-matrixone |
-| Reporting replica | PostgreSQL | PostgreSQL #2 (native logical replication) | `Order::mirror('reporting')->...` |
+| Reporting replica | PostgreSQL | PostgreSQL #2 (native logical replication) | `Reporting\Order::...` |
 | Joins across "systems" | orders in CockroachDB, customers in PostgreSQL | both mirrored to MatrixOne | analytics joins run locally in MatrixOne |
 | Online migration (the original goal, live) | old database | new database | `copy` → mirror / CDC catch-up → `mirror:verify` → switch the owner → reverse mirror during a rollback window |
 
@@ -284,7 +289,7 @@ about its table, then compares what the two have in common:
 | Phase | Content | Size |
 |---|---|---|
 | 0. Spikes | Prove the risky parts before designing APIs: (a) queue mirror MySQL/PG → MatrixOne and → XTDB with a version guard; (b) CockroachDB webhook changefeed → HTTPS receiver in Laravel (payload, `resolved`, dedupe); (c) PostgreSQL logical slot polled from PHP (`test_decoding` / `wal2json`, deletes with replica identity); (d) MatrixOne CDC lifecycle from Laravel (PITR, `mo_cdc_task` status, MatrixOne → MySQL sink); (e) XTDB `ATTACH` a PostgreSQL 17 source in docker compose | S each |
-| 1. Mirror core (queue engine) | registry, `Mirrored` trait with `#[MirroredAs]`, `MirrorModel` (read-only, relations, eager loading in the mirror and across connections, derived relations with `MirrorsOwnerRelations`, owner-side `hasMirror()` / `hasMirrorHistory()`), observer + queue engine (`fresh` / `snapshot` payloads), `MirrorWriter` for every family (XTDB experimental), `ValueMapper` from `Copier`, state table, `mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync`, `mirror:flush`, docs (`docs/mirrors.md`); **mirror conformance tests** over owner × mirror pairs of the existing conformance servers | L |
+| 1. Mirror core (queue engine) | registry, `Mirrored` trait with `#[MirroredAs]`, `MirrorModel` (read-only; relations to mirror models and to owner models, the latter kept on the owner connection; `fromOwner()`, `mirrorSchema()`), observer + queue engine (`versions`: `latest` / `all`), `MirrorWriter` for every family (XTDB experimental), `ValueMapper` from `Copier`, state table, `mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync`, `mirror:flush`, docs (`docs/mirrors.md`); **mirror conformance tests** over owner × mirror pairs of the existing conformance servers | L |
 | 2. Query side | `fresh()` / `orOwner()`, XTDB history sugar, Scout mirror engine | M |
 | 3. Poll engine | watermark pull (`updated_at`, CockroachDB MVCC timestamp, PostgreSQL slot), soft deletes and key reconciliation, scheduling | M |
 | 4. Native CDC and replication | contracts + implementations: MatrixOne `CREATE CDC` (MatrixOne/MySQL sinks), CockroachDB changefeeds (webhook receiver; Kafka later), PostgreSQL publication/subscription and slots, XTDB external sources (generated `ATTACH` + node YAML + PostgreSQL setup), MySQL replication commands (generated) | L |

@@ -318,11 +318,11 @@ php artisan db-portable:copy --from=crdb --to=matrixone --resume       # continu
 ## Parallel databases (design preview)
 
 Planned: keep **mirrors** of chosen tables in other databases (MatrixOne for analytics, XTDB for history, a second
-PostgreSQL for reporting), synchronised through the queue like Laravel Scout, and read them with Eloquent models and
-relations: `#[MirroredAs]`, `Order::mirror('analytics')->with('customer')->...`, and `mirror:schema`, `mirror:data`,
-`mirror:stats` commands. Nothing is implemented yet; see [docs/mirrors.md](docs/mirrors.md) for the API and
-[docs/plans/parallel-databases.md](docs/plans/parallel-databases.md) for the plan (sync engines, native change
-capture per database pair, phases).
+PostgreSQL for reporting), synchronised through the queue like Laravel Scout, and read them with Eloquent models:
+`#[MirroredAs]` on the owner models, mirror models with ordinary relations (`Analytics\Order::with('customer')->...`),
+and the `mirror:schema`, `mirror:data`, `mirror:stats` commands. Nothing is implemented yet; see
+[docs/mirrors.md](docs/mirrors.md) for the API and [docs/plans/parallel-databases.md](docs/plans/parallel-databases.md)
+for the plan (sync engines, native change capture per database pair, phases).
 
 ## Testing
 

@@ -5,19 +5,20 @@
 
 An application keeps writing to the database it uses today, its **owner**, and keeps copies of chosen tables in
 other databases, its **mirrors**, to use what each does best: MatrixOne for analytics and search, XTDB for history
-and audit, a second PostgreSQL for reporting. Reads from a mirror use Eloquent models and relations, like reads from
-the owner.
+and audit, a second PostgreSQL for reporting. Each mirrored table has a **mirror model**, an Eloquent model on the
+mirror's connection, and a query runs on a mirror by using that model.
 
-It works like Laravel Scout: a trait on the model, observers that queue the sync, commands to backfill and check,
-and a query API on the other side. Scout does it for search engines; mirrors do it for any database and capability.
+It works like Laravel Scout: a trait on the owner model, observers that queue the sync, commands to backfill and
+check, and models to query the other side. Scout does it for search engines; mirrors do it for any database and
+capability.
 
 Three rules keep it simple:
 
 - **One owner per table.** A table is written in one database only; mirrors are read-only copies. Different tables
   may have different owners.
 - **Eventually consistent.** A mirror follows its owner through a queue, a few seconds behind; `mirror:stats` shows
-  how far and whether the two differ.
-- **Explicit.** A query runs on a mirror only when it says so: `Order::mirror('analytics')`.
+  whether the two tables differ.
+- **Explicit.** A query runs on a mirror because it uses a mirror model (`Analytics\Order`), never implicitly.
 
 ## Quick start
 
@@ -41,24 +42,31 @@ class Order extends Model
 
 // app/Models/Analytics/Order.php: the mirror model
 use DbPortable\Mirror\MirrorModel;
-use DbPortable\Mirror\MirrorsOwnerRelations;
 
 class Order extends MirrorModel
 {
-    use MirrorsOwnerRelations;
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Customer::class);   // customers stay in the owner database
+    }
 }
 ```
 
 ```bash
-php artisan db-portable:mirror:sync analytics     # create the mirror tables, copy the rows, compare both sides
+php artisan db-portable:mirror:sync analytics     # create the mirror table, copy the rows, compare both sides
 ```
 
 ```php
-Order::mirror('analytics')
-    ->with('customer')
+// Paid revenue per day, computed by MatrixOne: one row per day (_wstart, _wend, paid)
+Analytics\Order::query()
     ->timeWindow('created_at', '1 day')
+    ->select('_wstart', '_wend')
     ->selectSumWhere('paid', 'total', fn ($q) => $q->where('status', 'paid'))
+    ->orderBy('_wstart')
     ->get();
+
+// Paid orders read from MatrixOne, with their customers from the owner database
+Analytics\Order::with('customer')->where('status', 'paid')->latest()->paginate(20);
 ```
 
 From then on, every order saved, deleted or restored through Eloquent reaches MatrixOne through the queue.
@@ -71,11 +79,11 @@ From then on, every order saved, deleted or restored through Eloquent reaches Ma
         'connection' => 'matrixone',     // a connection of config/database.php
         'queue' => 'mirrors',            // queue name (default: the default queue)
         'queue_connection' => null,      // queue connection (default: the default one)
-        'payload' => 'fresh',            // fresh | snapshot, see "How changes flow"
+        'versions' => 'latest',          // latest | all, see "Latest state or every version"
     ],
     'history' => [
         'connection' => 'xtdb',
-        'payload' => 'snapshot',         // every version, for bitemporal history
+        'versions' => 'all',             // every version, for bitemporal history
         'valid_time' => 'updated_at',    // each version is valid from this column
         'erase_on_force_delete' => false,
     ],
@@ -101,10 +109,9 @@ class Order extends Model
 }
 ```
 
-- `#[MirroredAs($mirror, $class)]` names the model representing the owner in a mirror; repeat it per mirror. A
-  `mirroredAs(): array` method (`['analytics' => Analytics\Order::class]`) does the same when the mapping depends on
-  configuration. Without a class (`#[MirroredAs('reporting')]`), the mirror is read through a generic read-only model
-  on the owner's table name.
+- `#[MirroredAs($mirror, $class)]` names the mirror model that receives the owner's rows in a mirror; repeat it per
+  mirror. A `mirroredAs(): array` method (`['analytics' => Analytics\Order::class]`) does the same when the mapping
+  depends on configuration.
 - `toMirrorArray(string $mirror): array` returns the row written to a mirror: the model's raw attributes by default.
   A mirror model's `fromOwner()` takes precedence.
 - Updates that bypass Eloquent events (`Order::where(...)->update(...)`) are not seen: call
@@ -113,7 +120,8 @@ class Order extends Model
 
 ## Mirror models
 
-A mirror model is a read-only Eloquent model on the mirror's connection:
+A mirror model is a read-only Eloquent model on the mirror's connection. It can be empty
+(`class Order extends MirrorModel {}`) or reshape and index the mirrored rows:
 
 ```php
 namespace App\Models\Analytics;
@@ -123,11 +131,6 @@ use DbPortable\Mirror\MirrorModel;
 class Order extends MirrorModel
 {
     protected $table = 'orders';                  // default: the owner's table name
-
-    public function customer(): BelongsTo
-    {
-        return $this->belongsTo(Customer::class);  // Analytics\Customer: runs in the mirror
-    }
 
     // Optional: the row written for an owner model.
     public static function fromOwner(\App\Models\Order $order): array
@@ -150,59 +153,78 @@ class Order extends MirrorModel
 - `$mirrorOrder->owner()` loads the owner row.
 - A history mirror model on XTDB also uses laravel-xtdb2's `Bitemporal` trait, for `history()`, `asOfValidTime()`
   and `versions()`.
+- Mirror models are ordinary Eloquent models otherwise: scopes, casts, accessors and the mirror driver's builder
+  methods (`timeWindow()` and `sample()` on MatrixOne, bitemporal queries on XTDB, `readStale()` on CockroachDB).
 
-## Relations and eager loading
+## Relations
 
-Mirror models have relations like any model. Declare them, or derive them from the owner model:
+Relations are declared on the mirror model, like on any model. Their target decides where the related rows are
+read:
 
 ```php
-class Order extends MirrorModel
+class Order extends MirrorModel   // App\Models\Analytics\Order
 {
-    use MirrorsOwnerRelations;   // customer(), items()... from App\Models\Order, retargeted to this mirror
+    // A mirror model of the same mirror: read from MatrixOne (customers must be mirrored there).
+    public function customer(): BelongsTo { return $this->belongsTo(Customer::class); }   // Analytics\Customer
+
+    // An owner model: read from the owner database.
+    public function coupon(): BelongsTo { return $this->belongsTo(\App\Models\Coupon::class); }
 }
 ```
 
-`MirrorsOwnerRelations` reads each relation of the owner model and builds the same relation on the mirror model:
-a related owner model mirrored in the same mirror is replaced by its mirror model, one that is not stays the owner
-model (a cross-database relation). A relation declared on the mirror model wins over the derived one.
-
-| Relation | `with()` (eager loading) | `whereHas()`, joins |
+| Target of the relation | `with()` (eager loading) | `whereHas()`, joins |
 |---|---|---|
-| mirror model → mirror model of the same mirror | yes, in the mirror database | yes, in the mirror database |
-| mirror model → owner model | yes, Eloquent runs that query on the owner's connection | no (two databases): a clear error |
-| owner model → its mirror row, `hasMirror('analytics')` | yes: `Order::with('analytics')->get()` | no |
-| owner model → its versions, `hasMirrorHistory('history')` | yes: `Order::with('history')->get()` | no |
+| a mirror model of the same mirror | in the mirror database | yes, in the mirror database |
+| an owner model | in the owner database: a second query by key | no (two databases): a clear error |
+
+A related model without its own `$connection` would, in plain Laravel, inherit the parent model's connection, so an
+owner model related to a mirror model would be read from the mirror database. `MirrorModel` prevents that: only
+mirror models share the mirror's connection, and owner models keep the default (owner) connection.
+
+Mirror tables have no foreign keys: rows arrive out of order, so a child can land before its parent. `mirror:stats`
+warns when a relation targets a mirror model whose table is missing or empty.
+
+### When to mirror related tables
+
+A related table does not have to be mirrored. It depends on what the mirror database has to do with it:
+
+| You need the related data to | Do | Mirror the related table? |
+|---|---|---|
+| display it next to mirror results (a list, a paginated report) | relate the mirror model to the owner model: `with()` reads it from the owner database by key | no |
+| filter or group by a few of its fields (revenue by customer country) | copy those fields into the mirrored row with `fromOwner()` | no |
+| query it freely: joins, `whereHas()`, many of its columns | mirror it too, and relate the mirror models | yes |
 
 ```php
-// Owner side: relations to the mirrors.
-class Order extends Model
+class Order extends MirrorModel   // App\Models\Analytics\Order
 {
-    use Mirrored;
-
-    public function history(): HasMany { return $this->hasMirrorHistory('history'); }
+    public static function fromOwner(\App\Models\Order $order): array
+    {
+        return $order->only('id', 'customer_id', 'status', 'total', 'created_at', 'updated_at') + [
+            'customer_country' => $order->customer->country,
+        ];
+    }
 }
 
-Order::with('history')->find($id)->history;   // every version of the order, from XTDB
+// Revenue by country, in MatrixOne, without a join
+Analytics\Order::groupBy('customer_country')->selectRaw('customer_country, sum(total) as revenue')->get();
 ```
 
-Joins and `whereHas()` need the related tables in the same mirror: mirror the related models too, or
-`mirror:stats` warns about relations that point to a mirror table that does not exist or is empty. Mirror tables
-have no foreign keys: rows arrive out of order, so a child can land before its parent.
+- Copied fields keep the value they had when the row was mirrored (the customer's country when the order was
+  written), which is often what analytics want; `mirror:data` rewrites the rows when they should follow later
+  changes.
+- Reading related rows from the owner suits pages of results; for exports of millions of rows, copy the fields or
+  mirror the table, so the owner database does not serve the related rows.
 
 ## Querying a mirror
 
 ```php
-Order::mirror('analytics')                       // = Analytics\Order::query()
-    ->with('customer', 'items')
+Analytics\Order::with('customer', 'items')
     ->where('created_at', '>=', now()->subMonth())
     ->get();
 
-Order::mirror('history')->whereKey($id)->history()->get();      // XTDB: every version
-Order::mirror('history')->asOfValidTime('2026-03-01')->count(); // XTDB: as it was on March 1st
+History\Order::whereKey($id)->history()->get();          // XTDB: every version of an order
+History\Order::asOfValidTime('2026-03-01')->count();     // XTDB: the orders as they were on March 1st
 ```
-
-The models are the mirror models, with the capabilities of the mirror's driver: `timeWindow()`, `sample()` and
-full-text on MatrixOne, bitemporal queries on XTDB, `readStale()` on CockroachDB.
 
 Planned for Phase 2: `->fresh()` waits until the mirror has caught up with the owner's latest change, and
 `->orOwner()` reads from the owner when the mirror lags.
@@ -214,12 +236,23 @@ save / delete / restore  ──after commit──▶  queue job  ──▶  mirr
 (owner, Eloquent events)                    (per mirror)     (upsert / delete, version guard)
 ```
 
-- Jobs are dispatched after the transaction commits: a rolled-back change never reaches a mirror.
-- **`fresh` payload** (default): the job carries the key, and the worker reads the owner row when it runs. A burst of
-  updates to one row becomes one write, and the mirror gets the latest state.
-- **`snapshot` payload** (history mirrors): the job carries the attributes as committed, so every version is written;
-  on XTDB each version is valid from its `valid_time` column (`updated_at`), so history is right even when jobs run
-  out of order.
+Jobs are dispatched after the transaction commits: a rolled-back change never reaches a mirror.
+
+### Latest state or every version
+
+`versions` sets what a queued job carries from the owner to the mirror:
+
+| `versions` | The job carries | The mirror gets | Use it for |
+|---|---|---|---|
+| `latest` (default) | the model and its key | the row as it is when the worker runs: five quick updates of one row make one write | analytics, search, reporting: mirrors that need the current state |
+| `all` | a copy of the row's attributes as committed | every committed version, in order of their version column | history mirrors (XTDB): each version becomes valid from its `valid_time` column |
+
+- With `latest`, a row deleted before the worker runs is deleted from the mirror.
+- With `all`, the row's values sit in the queue until the job runs: encrypt the jobs (`ShouldBeEncrypted`) when they
+  carry personal data.
+
+### Writes
+
 - Every write is an upsert guarded by a version (the owner's `updated_at`): replaying a job, or running two out of
   order, leaves the mirror correct.
 - A delete removes the mirror row (on XTDB: ends its validity, the history stays). A soft delete writes `deleted_at`;
@@ -236,11 +269,11 @@ php artisan db-portable:mirror:schema analytics --migration    # write a migrati
 php artisan db-portable:mirror:schema analytics                # create or alter the mirror tables
 ```
 
-Compares each owner table with its mirror table and creates or alters the mirror table: the owner's columns mapped
-to the mirror's types (the same checks as `db-portable:audit`: string widths, integer ranges, JSON), plus the mirror
-model's `mirrorSchema()` (portable indexes such as `trigramIndex()`, full-text or vector indexes). No foreign keys.
-XTDB mirrors get `CREATE TABLE (columns)`. A column dropped on the owner stays on the mirror and is reported by
-`mirror:stats`.
+Compares each owner table with its mirror table and creates or alters the mirror table: the columns of the mirrored
+rows mapped to the mirror's types (the same checks as `db-portable:audit`: string widths, integer ranges, JSON), plus
+the mirror model's `mirrorSchema()` (portable indexes such as `trigramIndex()`, full-text or vector indexes). No
+foreign keys. XTDB mirrors get `CREATE TABLE (columns)`. A column dropped on the owner stays on the mirror and is
+reported by `mirror:stats`.
 
 ### mirror:data
 
@@ -289,7 +322,7 @@ status nulls                           0                      0
 total sum                              98,120,331.50          98,119,870.00         ≠
 updated_at max                         2026-09-29 10:15:02    2026-09-29 10:14:58   lag 4 s
 queue                                  3 pending, 0 failed
-relations                              items → analytics.order_items: missing table
+relations                              items → Analytics\OrderItem: table missing
 ```
 
 `mirror:data` fixes missing or stale rows, `mirror:data --prune` extra ones.
@@ -305,18 +338,18 @@ php artisan db-portable:mirror:flush analytics   # empty the mirror tables (ERAS
 
 ### Analytics in MatrixOne, OLTP in PostgreSQL or MySQL
 
-Mirror the tables a dashboard needs (orders, their items, customers) to MatrixOne; the dashboard queries run there,
-joins included, without touching the OLTP database:
+Mirror the tables a dashboard needs, and copy into them the few fields of other tables it filters or groups by; the
+dashboard queries run in MatrixOne without touching the OLTP database:
 
 ```php
 #[MirroredAs('analytics', Analytics\Order::class)]      class Order extends Model { use Mirrored; }
 #[MirroredAs('analytics', Analytics\OrderItem::class)]  class OrderItem extends Model { use Mirrored; }
-#[MirroredAs('analytics', Analytics\Customer::class)]   class Customer extends Model { use Mirrored; }
 
-Order::mirror('analytics')
-    ->join('customers', 'customers.id', '=', 'orders.customer_id')
-    ->timeWindow('orders.created_at', '1 hour')
-    ->selectCountWhere('paid_orders', fn ($q) => $q->where('orders.status', 'paid'))
+// Items sold per product, joined inside MatrixOne
+Analytics\OrderItem::join('orders', 'orders.id', '=', 'order_items.order_id')
+    ->where('orders.status', 'paid')
+    ->groupBy('order_items.product_id')
+    ->selectRaw('order_items.product_id, sum(order_items.quantity) as sold')
     ->get();
 ```
 
@@ -324,27 +357,23 @@ Order::mirror('analytics')
 
 ```php
 #[MirroredAs('history', History\Order::class)]
-class Order extends Model
-{
-    use Mirrored;
-
-    public function history(): HasMany { return $this->hasMirrorHistory('history'); }
-}
+class Order extends Model { use Mirrored; }
 
 // app/Models/History/Order.php
-class Order extends MirrorModel { use Bitemporal; }          // Bitemporal from laravel-xtdb2
+class Order extends MirrorModel { use Bitemporal; }   // Bitemporal from laravel-xtdb2
 
-$order->history;                                              // every version, with _valid_from / _valid_to
-Order::mirror('history')->asOfValidTime('2026-03-01')->get(); // the orders as they were on March 1st
+History\Order::whereKey($order->id)->history()->get();   // every version, with _valid_from / _valid_to
+History\Order::asOfValidTime('2026-03-01')->get();      // the orders as they were on March 1st
 ```
 
-With the `snapshot` payload and `valid_time => 'updated_at'`, the owner keeps its usual tables while XTDB keeps the
-full history, and `erase_on_force_delete` covers erasure requests.
+With `'versions' => 'all'` and `'valid_time' => 'updated_at'`, the owner keeps its usual tables while XTDB keeps
+the full history, and `erase_on_force_delete` covers erasure requests.
 
 ### A reporting copy
 
-A second PostgreSQL (or MySQL) with the same tables, for reports and exports that should not load the owner:
-`#[MirroredAs('reporting')]` on the models, `mirror:sync reporting`, then `Order::mirror('reporting')`.
+A second PostgreSQL (or MySQL) with the same tables, for reports and exports that should not load the owner: an
+empty mirror model per table (`class Order extends MirrorModel {}` in `App\Models\Reporting`), `#[MirroredAs]` on
+the owner models, `mirror:sync reporting`, then `Reporting\Order::...`.
 
 ### Moving to another database without downtime
 
@@ -356,6 +385,7 @@ make the new database the owner (the connection of the models) and, for a while,
 - Writes that bypass Eloquent events are not mirrored unless followed by `mirrorable()`; the poll engine (Phase 3)
   and native change capture (Phase 4) will cover them.
 - Mirrors are eventually consistent: a read right after a write may not see it yet.
-- `whereHas()` and joins across the owner and a mirror are not possible (two databases); mirror the related tables.
+- `whereHas()` and joins between a mirror and the owner are not possible (two databases): copy the fields you need
+  with `fromOwner()`, or mirror the related tables.
 - Mirror tables have no foreign keys, and owner schema changes need `mirror:schema` (or `mirror:sync`).
 - XTDB mirrors depend on laravel-xtdb2 and XTDB 2.2, both pre-releases.
