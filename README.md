@@ -147,9 +147,45 @@ Post::select('*')->selectFullTextRelevance(['title', 'body'], $search)->get();
 | `whereStartsWith()`, `whereContains()` | `ilike`, trigram index | `ilike`, trigram index | `ilike` | `like` (the `_ci` collation) | `like` (ASCII case only) |
 | `unaccent: true` | `unaccent(lower(col))` | `unaccent()` (extension) | no effect: accents count | the collation decides | no effect |
 | `whereSimilar()`, `orderBySimilarity()` | `%` and `similarity()` (driver) | `%` and `similarity()` (`pg_trgm`) | contains; score 1 prefix / 0.5 contains (warning) | same as MatrixOne | same as MatrixOne |
-| `searchFullText()`, `*FullTextRelevance()` | `ts_rank` (driver) | `ts_rank` | `match ... against` (driver) | `match ... against` | no `whereFullText()`; relevance 0 (warning) |
+| `searchFullText()`, `*FullTextRelevance()` | `ts_rank` (driver) | `ts_rank` | `match ... against` (driver) | `match ... against` | FTS5 `match` and `bm25()` ([below](#full-text-search-on-sqlite-fts5)) |
 
 The drivers ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.5+, [laravel-matrixone](https://github.com/vuthaihoc/laravel-matrixone) 1.2+) implement these methods themselves; the macros cover the other databases.
+
+#### Full-text search on SQLite (FTS5)
+
+Laravel's `whereFullText()` and `$table->fullText()` throw on SQLite. db-portable implements them with FTS5, the
+full-text engine built into PHP's SQLite, without another driver: each SQLite connection gets subclasses of
+Laravel's SQLite grammars that add only these.
+
+```php
+Schema::create('posts', function (Blueprint $table) {
+    $table->id();
+    $table->string('title');
+    $table->text('body');
+    $table->fullText(['title', 'body']);   // SQLite: an FTS5 table kept up to date by triggers
+});
+
+Post::whereFullText(['title', 'body'], 'pho co')->get();                          // finds "Phố cổ"
+Post::whereFullText('body', '"ho guom" OR ben -cho', ['mode' => 'websearch'])->get();
+Post::searchFullText(['title', 'body'], 'pho co')->get();                         // most relevant first (bm25)
+```
+
+- `$table->fullText(cols)` creates an FTS5 table named as the index (`posts_title_body_fulltext`) that reads the
+  table's rows, indexes the existing ones, and three triggers keep it up to date on every insert, update and delete,
+  through Eloquent or not. The default tokenizer ignores case and accents, and folds `đ`, `ł` and `ø` ("da nang" finds
+  "Đà Nẵng"); `->language('english')` also stems English words, `->language('trigram')` matches any part of a word of
+  3 characters or more.
+- `whereFullText()` matches every word, as on PostgreSQL (MySQL's natural language mode matches any word). Its
+  `mode` option: `phrase` (the text as one phrase), `websearch` (`"phrases"`, `OR`, `-excluded`, `prefix*`),
+  `boolean` (MySQL's `+required -excluded`), `raw` (FTS5 query syntax). It uses the FTS5 table covering the columns,
+  whatever its name; without one, a `LIKE` per word, with a warning (an exception with `db-portable.strict`).
+- `dropFullText()` drops the FTS5 table and its triggers, and so does dropping the table. Scout's database engine
+  (`#[SearchUsingFullText]`) and `db-portable:search-indexes` work with them.
+- `'sqlite_fulltext' => false` in `config/db-portable.php` turns this off; a connection with its own grammar is left
+  alone.
+- FTS5 matches rows by rowid: after a `VACUUM`, a table without an integer primary key needs
+  `DbPortable\Sqlite\FullText::rebuild($connection, 'posts')`. Drop the full-text index before renaming the table or
+  dropping one of its columns. Each index adds four FTS5 tables to `Schema::getTables()`.
 
 #### Contracts
 
@@ -244,7 +280,7 @@ php artisan db-portable:search-indexes --like                   # also the LIKE 
 
 | Declared on `toSearchableArray()` | CockroachDB / PostgreSQL | MatrixOne | MySQL | SQLite |
 |---|---|---|---|---|
-| `#[SearchUsingFullText(cols, ['language' => ...])]` | `fullText(cols)->language(...)`, matching `whereFullText()` | `fullText(cols)`: **required**, `MATCH` fails without it | `fullText(cols)` | none |
+| `#[SearchUsingFullText(cols, ['language' => ...])]` | `fullText(cols)->language(...)`, matching `whereFullText()` | `fullText(cols)`: **required**, `MATCH` fails without it | `fullText(cols)` | `fullText(cols)`: an FTS5 table |
 | `#[SearchUsingFuzzy(cols, unaccent: ...)]` ([cockroachdb-laravel](https://github.com/vuthaihoc/crdb2025) 2.4) | `trigramIndex(col, unaccent: ...)` | none (no trigram similarity) | none | none |
 | `#[SearchUsingPrefix(cols)]` | `trigramIndex(col)` (serves `ilike 'x%'`) | `index(col)` | `index(col)` | `index(col)` |
 | other columns, with `--like` | `trigramIndex(col)` | none (`LIKE '%x%'` cannot use an index) | none | none |

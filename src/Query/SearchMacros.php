@@ -4,6 +4,7 @@ namespace DbPortable\Query;
 
 use DbPortable\Schema\Family;
 use DbPortable\Schema\Unsupported;
+use DbPortable\Sqlite\FullText;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use InvalidArgumentException;
@@ -74,17 +75,17 @@ final class SearchMacros
         Builder::macro('selectFullTextRelevance', function (string|array $columns, string $value, string $as = 'relevance', array $options = []) {
             /** @var Builder $this */
             /** @var array<string, mixed> $options */
-            $sql = SearchMacros::relevance($this, array_values(array_filter((array) $columns, 'is_string')), $options);
+            [$sql, $bindings] = SearchMacros::relevance($this, array_values(array_filter((array) $columns, 'is_string')), $value, $options);
 
-            return $this->selectRaw("{$sql} as {$this->getGrammar()->wrap($as)}", $sql === '0' ? [] : [$value]);
+            return $this->selectRaw("{$sql} as {$this->getGrammar()->wrap($as)}", $bindings);
         });
 
         Builder::macro('orderByFullTextRelevance', function (string|array $columns, string $value, array $options = [], string $direction = 'desc') {
             /** @var Builder $this */
             /** @var array<string, mixed> $options */
-            $sql = SearchMacros::relevance($this, array_values(array_filter((array) $columns, 'is_string')), $options);
+            [$sql, $bindings] = SearchMacros::relevance($this, array_values(array_filter((array) $columns, 'is_string')), $value, $options);
 
-            return $sql === '0' ? $this : $this->orderByRaw($sql.' '.SearchMacros::direction($direction), [$value]);
+            return $sql === '0' ? $this : $this->orderByRaw($sql.' '.SearchMacros::direction($direction), $bindings);
         });
 
         // whereFullText() with the most relevant matches first.
@@ -202,14 +203,15 @@ final class SearchMacros
     }
 
     /**
-     * Full-text relevance, the expression whereFullText() matches: ts_rank
-     * on PostgreSQL, MATCH ... AGAINST on MySQL/MariaDB; '0' (no ordering)
-     * on SQLite.
+     * Full-text relevance, of the rows whereFullText() matches: ts_rank on
+     * PostgreSQL, MATCH ... AGAINST on MySQL/MariaDB, bm25() of the FTS5 table
+     * on SQLite; '0' (no ordering) where there is none.
      *
      * @param  list<string>  $columns
      * @param  array<string, mixed>  $options
+     * @return array{0: string, 1: list<string>}
      */
-    public static function relevance(Builder $query, array $columns, array $options): string
+    public static function relevance(Builder $query, array $columns, string $value, array $options): array
     {
         $grammar = $query->getGrammar();
         $mode = $options['mode'] ?? null;
@@ -229,15 +231,37 @@ final class SearchMacros
                     default => 'plainto_tsquery',
                 };
 
-                return "ts_rank(({$document}), {$function}('{$language}', ?))";
+                return ["ts_rank(({$document}), {$function}('{$language}', ?))", [$value]];
 
             case Family::MYSQL:
-                return sprintf('match (%s) against (? in %s mode)', $grammar->columnize($columns), $mode === 'boolean' ? 'boolean' : 'natural language');
+                return [sprintf('match (%s) against (? in %s mode)', $grammar->columnize($columns), $mode === 'boolean' ? 'boolean' : 'natural language'), [$value]];
+
+            case Family::SQLITE:
+                if (FullText::installed(self::connection($query))) {
+                    [$table, $reference] = FullText::source($query);
+                    $columns = array_map(fn (string $column) => (string) last(explode('.', $column)), $columns);
+                    $fts = FullText::tableFor(self::connection($query), $table, $columns);
+                    $text = FullText::query($value, is_string($mode) ? $mode : null);
+
+                    if ($fts !== null && $text !== null) {
+                        $wrapped = $grammar->wrapTable($fts[0], '');
+
+                        // bm25() is lower for better matches.
+                        return [
+                            "coalesce((select -bm25({$wrapped}) from {$wrapped} where {$wrapped} match ? and {$wrapped}.rowid = {$grammar->wrap($reference.'.rowid')}), 0)",
+                            [FullText::match($text, $columns, $fts[1])],
+                        ];
+                    }
+                }
+
+                self::skip($query, 'Full-text relevance', 'no FTS5 index, 0 is used');
+
+                return ['0', []];
 
             default:
                 self::skip($query, 'Full-text relevance', 'no relevance score, 0 is used');
 
-                return '0';
+                return ['0', []];
         }
     }
 

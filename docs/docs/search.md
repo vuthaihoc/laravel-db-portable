@@ -98,6 +98,42 @@ $options = [
 Article::query()->searchFullText('title', 'postgres AND cockroach', $options)->get();
 ```
 
+## Full-Text Search on SQLite (FTS5)
+
+Laravel's `whereFullText()` and `$table->fullText()` throw on SQLite. db-portable implements them with FTS5, the
+full-text engine built into PHP's SQLite, without another driver: each SQLite connection gets subclasses of
+Laravel's SQLite grammars that add only these.
+
+```php
+Schema::create('posts', function (Blueprint $table) {
+    $table->id();
+    $table->string('title');
+    $table->text('body');
+    $table->fullText(['title', 'body']);   // SQLite: an FTS5 table kept up to date by triggers
+});
+
+Post::whereFullText(['title', 'body'], 'pho co')->get();                          // finds "Phố cổ"
+Post::whereFullText('body', '"ho guom" OR ben -cho', ['mode' => 'websearch'])->get();
+Post::searchFullText(['title', 'body'], 'pho co')->get();                         // most relevant first (bm25)
+```
+
+- `$table->fullText(cols)` creates an FTS5 table named as the index (`posts_title_body_fulltext`) that reads the
+  table's rows, indexes the existing ones, and three triggers keep it up to date on every insert, update and delete,
+  through Eloquent or not. The default tokenizer ignores case and accents, and folds `đ`, `ł` and `ø` ("da nang" finds
+  "Đà Nẵng"); `->language('english')` also stems English words, `->language('trigram')` matches any part of a word of
+  3 characters or more.
+- `whereFullText()` matches every word, as on PostgreSQL (MySQL's natural language mode matches any word). Its
+  `mode` option: `phrase` (the text as one phrase), `websearch` (`"phrases"`, `OR`, `-excluded`, `prefix*`),
+  `boolean` (MySQL's `+required -excluded`), `raw` (FTS5 query syntax). It uses the FTS5 table covering the columns,
+  whatever its name; without one, a `LIKE` per word, with a warning (an exception with `db-portable.strict`).
+- `dropFullText()` drops the FTS5 table and its triggers, and so does dropping the table. Scout's database engine
+  (`#[SearchUsingFullText]`) and `db-portable:search-indexes` work with them.
+- `'sqlite_fulltext' => false` in `config/db-portable.php` turns this off; a connection with its own grammar is left
+  alone.
+- FTS5 matches rows by rowid: after a `VACUUM`, a table without an integer primary key needs
+  `DbPortable\Sqlite\FullText::rebuild($connection, 'posts')`. Drop the full-text index before renaming the table or
+  dropping one of its columns. Each index adds four FTS5 tables to `Schema::getTables()`.
+
 ---
 
 ## Driver Capabilities Summary
@@ -108,4 +144,4 @@ Article::query()->searchFullText('title', 'postgres AND cockroach', $options)->g
 | `whereContains()` | `ILIKE` | `ILIKE` | `ILIKE` | `LIKE` (`_ci` collation) | `LIKE` (ASCII) |
 | `unaccent: true` | `unaccent(lower(col))` | `unaccent()` extension | Collation-dependent | Collation-dependent | Not supported |
 | `whereSimilar()` | Trigram `%` | Trigram `%` (`pg_trgm`) | Contains fallback | Contains fallback | Contains fallback |
-| `searchFullText()` | `ts_rank` | `ts_rank` | `MATCH ... AGAINST` | `MATCH ... AGAINST` | Skipped with warning |
+| `searchFullText()` | `ts_rank` | `ts_rank` | `MATCH ... AGAINST` | `MATCH ... AGAINST` | FTS5 `MATCH`, `bm25()` |

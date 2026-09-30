@@ -104,7 +104,7 @@ class SearchIndexesTest extends TestCase
                 'fulltext title,body' => 'missing', 'trigram word' => 'skipped', 'index code' => 'missing', 'vector embedding' => 'missing',
             ]],
             'sqlite' => ['sqlite', [
-                'fulltext title,body' => 'skipped', 'trigram word' => 'skipped', 'index code' => 'missing', 'vector embedding' => 'skipped',
+                'fulltext title,body' => 'missing', 'trigram word' => 'skipped', 'index code' => 'missing', 'vector embedding' => 'skipped',
             ]],
         ];
     }

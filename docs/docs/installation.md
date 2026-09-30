@@ -65,6 +65,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Full-Text Search on SQLite
+    |--------------------------------------------------------------------------
+    |
+    | whereFullText() and $table->fullText() on SQLite, with FTS5 tables kept
+    | up to date by triggers: Laravel's SQLite grammars are replaced by
+    | subclasses on each SQLite connection (the driver stays Laravel's).
+    |
+    */
+    'sqlite_fulltext' => true,
+
+    /*
+    |--------------------------------------------------------------------------
     | Parallel Database Mirrors
     |--------------------------------------------------------------------------
     |

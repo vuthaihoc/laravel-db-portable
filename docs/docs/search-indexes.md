@@ -48,7 +48,7 @@ class Post extends Model
 
 | Scout Attribute | CockroachDB / PostgreSQL | MatrixOne | MySQL | SQLite |
 |---|---|---|---|---|
-| `#[SearchUsingFullText(cols)]` | `fullText(cols)->language(...)` | `fullText(cols)` *(Required for `MATCH`)* | `fullText(cols)` | None |
+| `#[SearchUsingFullText(cols)]` | `fullText(cols)->language(...)` | `fullText(cols)` *(Required for `MATCH`)* | `fullText(cols)` | `fullText(cols)`: an FTS5 table ([Search](/docs/search#full-text-search-on-sqlite-fts5)) |
 | `#[SearchUsingFuzzy(cols)]` | `trigramIndex(col, unaccent: ...)` | None | None | None |
 | `#[SearchUsingPrefix(cols)]` | `trigramIndex(col)` | Plain `index(col)` | Plain `index(col)` | Plain `index(col)` |
 | `toSearchableEmbedding()` | `vectorIndex(col)` | `vectorIndex(col)` | None | None |

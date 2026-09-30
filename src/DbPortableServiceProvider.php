@@ -15,9 +15,12 @@ use DbPortable\Query\AnalyticsMacros;
 use DbPortable\Query\HistoricalReadMacros;
 use DbPortable\Query\SearchMacros;
 use DbPortable\Schema\SchemaMacros;
+use DbPortable\Sqlite\FullText;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Events\ConnectionEstablished;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
 use Illuminate\Support\ServiceProvider;
@@ -43,6 +46,18 @@ class DbPortableServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // whereFullText() and $table->fullText() on SQLite, with FTS5 (see Sqlite\FullText).
+        if ($this->app->resolved('db')) {
+            foreach ($this->app->make('db')->getConnections() as $connection) {
+                static::installSqliteFullText($connection);
+            }
+        }
+
+        $this->app->make('events')->listen(
+            ConnectionEstablished::class,
+            fn (ConnectionEstablished $event) => static::installSqliteFullText($event->connection),
+        );
+
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/db-portable.php' => config_path('db-portable.php')], 'db-portable-config');
             $this->commands([
@@ -137,6 +152,13 @@ class DbPortableServiceProvider extends ServiceProvider
             /** @var EloquentBuilder<Model> $this */
             return $this->incrementJson($path, -$amount, $extra);
         });
+    }
+
+    public static function installSqliteFullText(Connection $connection): void
+    {
+        if (config('db-portable.sqlite_fulltext', true)) {
+            FullText::install($connection);
+        }
     }
 
     /**

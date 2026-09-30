@@ -116,10 +116,6 @@ class SearchMacrosTest extends TestCase
     #[DataProvider('connections')]
     public function test_full_text_relevance(string $connection): void
     {
-        if ($connection === 'sqlite') {
-            $this->markTestSkipped('SQLite has no whereFullText().');
-        }
-
         $this->useConnection($connection);
         // MatrixOne allows one FULLTEXT index per column (trigramIndex() made one on "word").
         Schema::connection($connection)->table('portable_words', fn (Blueprint $table) => $table->fullText('phrase'));

@@ -3,6 +3,7 @@
 namespace DbPortable\Search;
 
 use DbPortable\Schema\Family;
+use DbPortable\Sqlite\FullText;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use ReflectionAttribute;
@@ -14,7 +15,7 @@ use Throwable;
  * (SCOUT_DRIVER=database, crdb or matrixone), read from the attributes of
  * its toSearchableArray():
  *
- * - #[SearchUsingFullText]: a FULLTEXT index (required on MatrixOne);
+ * - #[SearchUsingFullText]: a FULLTEXT index (required on MatrixOne; an FTS5 table on SQLite);
  * - #[SearchUsingFuzzy] (cockroachdb-laravel): a trigram index;
  * - #[SearchUsingPrefix]: a trigram index (PostgreSQL family) or an index;
  * - toSearchableEmbedding(): a vector index on the embedding column;
@@ -127,6 +128,17 @@ final class SearchIndexPlanner
                         return $this->index($model, 'fulltext', $columns, SearchIndex::SKIPPED,
                             'the table has foreign keys: inserts into a table with a FULLTEXT index and its own foreign key crash MatrixOne 4.2.4');
                     }
+                }
+
+                return $this->index($model, 'fulltext', $columns, SearchIndex::MISSING, $name, "\$table->fullText({$list});", $down);
+
+            case Family::SQLITE:
+                if (! FullText::installed($connection)) {
+                    return $this->index($model, 'fulltext', $columns, SearchIndex::SKIPPED, 'SQLite full-text indexes (FTS5) are turned off by db-portable.sqlite_fulltext');
+                }
+
+                if ($fts = FullText::tableFor($connection, $model->getTable(), $columns)) {
+                    return $this->index($model, 'fulltext', $columns, SearchIndex::OK, $fts[0]);
                 }
 
                 return $this->index($model, 'fulltext', $columns, SearchIndex::MISSING, $name, "\$table->fullText({$list});", $down);

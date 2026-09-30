@@ -7,7 +7,14 @@ return [
     | query or schema feature, a mirror table lacks a mirrored column, or a
     | mirror is not configured.
     */
-    'strict' => false,
+    'strict' => env('DB_PORTABLE_STRICT', false),
+
+    /*
+    | whereFullText() and $table->fullText() on SQLite, with FTS5 tables kept up
+    | to date by triggers: Laravel's SQLite grammars are replaced by subclasses
+    | on each SQLite connection (the driver stays Laravel's).
+    */
+    'sqlite_fulltext' => true,
 
     /*
     | Mirrors: owner models name them with #[MirroredAs('analytics', ...)];

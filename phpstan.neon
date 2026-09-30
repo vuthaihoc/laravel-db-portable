@@ -13,3 +13,8 @@ parameters:
         # Library traits (Mirror\Mirrored) are used by applications, not by the package.
         -
             identifier: trait.unused
+        # Schema grammar compile methods may return several statements: Blueprint::toSql() merges
+        # arrays, as Laravel's own grammars return them; the parent docblocks only say string.
+        -
+            identifier: method.childReturnType
+            path: src/Sqlite/SchemaGrammar.php

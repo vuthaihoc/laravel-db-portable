@@ -118,6 +118,25 @@ $table->partialIndex(['email', 'tenant_id'], 'is_active = true');
 
 ---
 
+## Full-Text Indexes on SQLite: `fullText`
+
+Laravel's `$table->fullText()` throws on SQLite; with db-portable it creates an FTS5 table, kept up to date by
+triggers, that `whereFullText()` searches:
+
+```php
+Schema::create('posts', function (Blueprint $table) {
+    $table->id();
+    $table->string('title');
+    $table->text('body');
+    $table->fullText(['title', 'body']);                 // accents and case ignored
+    $table->fullText('summary')->language('english');    // English stemming
+});
+```
+
+See [Full-Text Search on SQLite](/docs/search#full-text-search-on-sqlite-fts5) for the queries, options and limits.
+
+---
+
 ## Conditional Migration: `forDriver`
 
 Run driver-specific Blueprint logic or raw statements without messy `if/else` checks:

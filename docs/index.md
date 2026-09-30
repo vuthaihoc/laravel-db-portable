@@ -24,6 +24,8 @@ features:
     details: Scan code for incompatible SQL, audit data fits against target schemas, and safely copy data with dependency ordering and sequence resets.
   - title: Historical & Stale Reads
     details: asOfTime and follower reads (readStale) for distributed databases like CockroachDB and MatrixOne with graceful fallback warnings.
+  - title: Full-Text Search on SQLite
+    details: Laravel's whereFullText() and $table->fullText() work on SQLite through FTS5 tables kept up to date by triggers, accent-insensitive, with bm25 relevance and no extra driver.
   - title: Parallel Database Mirrors
     details: Keep read-only copies of chosen tables in specialised databases (e.g. MatrixOne for analytics, XTDB for audit), synchronized via queues.
 ---
