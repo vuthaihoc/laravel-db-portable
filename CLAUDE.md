@@ -10,6 +10,7 @@ Guidance for Claude Code when working in this repository.
 
 - `composer test` — PHPUnit. `Unit` needs no server; `Conformance` runs on SQLite, MatrixOne (127.0.0.1:6001, root/111) CockroachDB (127.0.0.1:26258, `docker run -d --name crdb-test -p 127.0.0.1:26258:26257 cockroachdb/cockroach:v26.2.6 start-single-node --insecure --store=type=mem,size=1GiB`), PostgreSQL (127.0.0.1:5433, postgres/secret, `postgres:17`) and MySQL (127.0.0.1:3307, root/secret, `mysql:8.4`); unreachable servers are skipped (`DB_PORTABLE_REQUIRE_SERVERS=1` fails instead).
 - `composer phpstan` (level 8), `composer cs` / `composer cs:fix` (Pint).
+- The local `vendor/` is Laravel 12; CI also runs Laravel 13 (Testbench 11). Before pushing changes to models, builders or grammars, run the suite on 13 in a copy: `rsync` the tree without `vendor`, then `composer require --dev --no-update "laravel/framework:13.*" "orchestra/testbench:^11.0"` and `COMPOSER_ROOT_VERSION=0.7.x-dev composer update -W`. Laravel 13 forbids making a model instance while it boots (`observe()` does), and declares more Eloquent builder methods itself (`incrementEach()`).
 - Dev dependencies `vuthaihoc/laravel-matrixone` (`^1.2`) and `vuthaihoc/cockroachdb-laravel` (`^2.5`) come from Packagist; their sources live in `../laravel-matrixone` and `../crdb2025`.
 
 ## Architecture

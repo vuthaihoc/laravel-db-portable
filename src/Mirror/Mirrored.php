@@ -20,7 +20,10 @@ trait Mirrored
 {
     public static function bootMirrored(): void
     {
-        static::observe(MirrorObserver::class);
+        // Not observe(): it makes an instance, which Laravel 13 forbids while the model boots.
+        foreach (['created', 'updated', 'deleted', 'forceDeleted'] as $event) {
+            static::registerModelEvent($event, fn (Model $model) => app(MirrorObserver::class)->{$event}($model));
+        }
 
         app(MirrorRegistry::class)->register(static::class);
     }

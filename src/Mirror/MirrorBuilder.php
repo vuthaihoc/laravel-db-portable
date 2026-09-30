@@ -54,6 +54,28 @@ class MirrorBuilder extends Builder
         throw MirrorIsReadOnly::write($this->model::class, 'decrement()');
     }
 
+    /**
+     * Laravel 13 declares it on the Eloquent builder; Laravel 12 forwards it through __call().
+     *
+     * @param  array<string, float|int|numeric-string>  $columns
+     * @param  array<string, mixed>  $extra
+     * @return int
+     */
+    public function incrementEach(array $columns, array $extra = [])
+    {
+        throw MirrorIsReadOnly::write($this->model::class, 'incrementEach()');
+    }
+
+    /**
+     * @param  array<string, float|int|numeric-string>  $columns
+     * @param  array<string, mixed>  $extra
+     * @return int
+     */
+    public function decrementEach(array $columns, array $extra = [])
+    {
+        throw MirrorIsReadOnly::write($this->model::class, 'decrementEach()');
+    }
+
     public function delete()
     {
         throw MirrorIsReadOnly::write($this->model::class, 'delete()');
