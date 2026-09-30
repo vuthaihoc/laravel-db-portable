@@ -18,3 +18,18 @@ parameters:
         -
             identifier: method.childReturnType
             path: src/Sqlite/SchemaGrammar.php
+        # Laravel 13 types raw SQL as literal-string (Laravel 12 as string). This package builds that
+        # SQL itself, from grammar-wrapped identifiers and dialect fragments, with the values bound:
+        # the rule does not apply. Unmatched on Laravel 12.
+        -
+            identifier: argument.type
+            message: '#literal-string#'
+            reportUnmatched: false
+        -
+            identifier: generics.notSubtype
+            message: '#Illuminate\\Database\\Query\\Expression#'
+            reportUnmatched: false
+        -
+            identifier: return.type
+            message: '#Expression<float\|int\|literal-string>#'
+            reportUnmatched: false

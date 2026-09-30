@@ -12,8 +12,14 @@ concurrency:
 
 jobs:
   static:
-    name: Pint + PHPStan
+    name: Pint + PHPStan - Laravel ${{ matrix.laravel }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { laravel: '12.*', testbench: '^10.0' }
+          - { laravel: '13.*', testbench: '^11.0' }
     steps:
       - uses: actions/checkout@v6
 
@@ -23,9 +29,17 @@ jobs:
           extensions: pdo_mysql, pdo_pgsql, pdo_sqlite
           coverage: none
 
+      - name: Require Laravel ${{ matrix.laravel }}
+        run: >
+          composer require --dev --no-update --no-interaction
+          "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}"
+
       - uses: ramsey/composer-install@v4
+        with:
+          dependency-versions: highest
 
       - run: composer cs
+        if: matrix.laravel == '12.*'
       - run: composer phpstan -- --error-format=github
 
   tests:
