@@ -38,10 +38,6 @@ class MirrorSchema
         $mirrorModel = $declaration->model;
         $table = MirrorTable::of($mirrorModel);
 
-        if (Family::isXtdb($table->connection)) {
-            throw new LogicException('XTDB mirrors are not supported yet.');
-        }
-
         /** @var Model $ownerModel */
         $ownerModel = new $owner;
         /** @var Connection $ownerConnection */
@@ -130,6 +126,11 @@ class MirrorSchema
      */
     public function audit(SchemaPlan $plan): array
     {
+        // XTDB columns take any value.
+        if (Family::isXtdb($plan->table->connection)) {
+            return [];
+        }
+
         /** @var Model $owner */
         $owner = new ($plan->owner);
         $auditor = new Auditor((string) $owner->getConnection()->getName(), (string) $plan->table->connection->getName());

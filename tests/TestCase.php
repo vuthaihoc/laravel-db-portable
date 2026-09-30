@@ -4,6 +4,7 @@ namespace DbPortable\Tests;
 
 use DbPortable\DbPortableServiceProvider;
 use Illuminate\Foundation\Application;
+use LaravelXtdb\XtdbServiceProvider;
 use MatrixOne\MatrixOneServiceProvider;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use PDO;
@@ -28,7 +29,7 @@ abstract class TestCase extends OrchestraTestCase
      */
     protected function getPackageProviders($app): array
     {
-        return [MatrixOneServiceProvider::class, CockroachDbServiceProvider::class, DbPortableServiceProvider::class];
+        return [MatrixOneServiceProvider::class, CockroachDbServiceProvider::class, XtdbServiceProvider::class, DbPortableServiceProvider::class];
     }
 
     /**
@@ -84,6 +85,18 @@ abstract class TestCase extends OrchestraTestCase
             'search_path' => 'public',
             'sslmode' => 'disable',
         ]);
+        // Experimental (XTDB 2.2 is a pre-release): used by the XTDB mirror tests only.
+        $app['config']->set('database.connections.xtdb', [
+            'driver' => 'xtdb',
+            'host' => self::env('XTDB_HOST', '127.0.0.1'),
+            'port' => (int) self::env('XTDB_PORT', '5435'),
+            'database' => 'xtdb',
+            'username' => 'xtdb',
+            'password' => '',
+            'charset' => 'utf8',
+            'prefix' => '',
+            'sslmode' => 'disable',
+        ]);
         $app['config']->set('database.connections.mysql', [
             'driver' => 'mysql',
             'host' => self::env('MYSQL_HOST', '127.0.0.1'),
@@ -124,8 +137,9 @@ abstract class TestCase extends OrchestraTestCase
         self::$available[$connection] ??= self::createDatabase($connection);
 
         if (! self::$available[$connection]) {
-            // CI sets DB_PORTABLE_REQUIRE_SERVERS so a missing server fails instead of passing silently.
-            if (self::env('DB_PORTABLE_REQUIRE_SERVERS', '') !== '') {
+            // CI sets DB_PORTABLE_REQUIRE_SERVERS so a missing server fails instead of passing silently;
+            // XTDB is experimental and not a CI server.
+            if (self::env('DB_PORTABLE_REQUIRE_SERVERS', '') !== '' && $connection !== 'xtdb') {
                 $this->fail("The {$connection} server is not reachable.");
             }
 
@@ -161,6 +175,12 @@ abstract class TestCase extends OrchestraTestCase
                     self::env('MYSQL_PASSWORD', 'secret'),
                     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 3],
                 ),
+                'xtdb' => new PDO(
+                    sprintf('pgsql:host=%s;port=%s;dbname=xtdb;sslmode=disable', self::env('XTDB_HOST', '127.0.0.1'), self::env('XTDB_PORT', '5435')),
+                    'xtdb',
+                    '',
+                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 3],
+                ),
                 default => null,
             };
 
@@ -180,6 +200,10 @@ abstract class TestCase extends OrchestraTestCase
                 $pdo->exec('create extension if not exists unaccent');
 
                 return true;
+            }
+
+            if ($connection === 'xtdb') {
+                return $pdo !== null;   // one database per XTDB node
             }
 
             $pdo?->exec('create database if not exists '.self::DATABASE);

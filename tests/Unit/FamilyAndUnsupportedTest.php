@@ -59,10 +59,6 @@ class FamilyAndUnsupportedTest extends TestCase
 
     public function test_xtdb_is_recognized_by_its_connection_class(): void
     {
-        if (! class_exists(XtdbConnection::class)) {
-            require_once __DIR__.'/../Stubs/XtdbConnection.php';
-        }
-
         $xtdb = new XtdbConnection(fn () => null, 'xtdb', '', ['driver' => 'xtdb']);
 
         $this->assertSame(Family::XTDB, Family::driver($xtdb));

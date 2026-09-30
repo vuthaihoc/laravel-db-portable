@@ -3,6 +3,8 @@
 namespace DbPortable\Mirror;
 
 use DbPortable\Mirror\Relations\MirrorMorphTo;
+use DbPortable\Schema\Family;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -98,10 +100,15 @@ abstract class MirrorModel extends Model
         return $this->table ??= (new (static::ownerClass()))->getTable();
     }
 
+    /**
+     * The owner's key column, or _id on XTDB, unless the model sets $primaryKey.
+     */
     public function getKeyName()
     {
         if ($this->primaryKey === '') {
-            $this->primaryKey = (new (static::ownerClass()))->getKeyName();
+            /** @var Connection $connection */
+            $connection = $this->getConnection();
+            $this->primaryKey = Family::isXtdb($connection) ? '_id' : (new (static::ownerClass()))->getKeyName();
         }
 
         return $this->primaryKey;

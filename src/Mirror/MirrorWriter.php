@@ -12,7 +12,10 @@ use LogicException;
 /**
  * Writes mirror tables: upserts keyed by the table's key and guarded by the
  * version column (a row never replaces a newer version, so replayed or
- * reordered jobs leave the mirror right), and deletes.
+ * reordered jobs leave the mirror right), and deletes. XTDB tables are
+ * written by XtdbWriter, which also writes every version of history mirrors.
+ *
+ * @phpstan-import-type Version from XtdbWriter
  */
 class MirrorWriter
 {
@@ -25,6 +28,8 @@ class MirrorWriter
     /** @var array<string, array{types: array<string, string>, at: int}> */
     protected array $columns = [];
 
+    public function __construct(protected XtdbWriter $xtdb) {}
+
     /**
      * @param  list<array<string, mixed>>  $rows  rows with the mirror table's column names
      * @return int the rows written or left alone because the mirror has a newer version
@@ -35,7 +40,9 @@ class MirrorWriter
             return 0;
         }
 
-        $this->ensureSupported($table);
+        if (Family::isXtdb($table->connection)) {
+            return $this->xtdb->upsert($table, $rows);
+        }
 
         $types = $this->types($table, $rows);
         $mapper = new ValueMapper($table->connection);
@@ -66,8 +73,6 @@ class MirrorWriter
      */
     public function delete(MirrorTable $table, array $keys): int
     {
-        $this->ensureSupported($table);
-
         $deleted = 0;
 
         foreach (array_chunk($keys, 1000) as $chunk) {
@@ -78,11 +83,31 @@ class MirrorWriter
     }
 
     /**
-     * Empty the table.
+     * Apply versions of rows to a history mirror (XTDB): each row valid from its time.
+     *
+     * @param  list<Version>  $versions
+     */
+    public function versions(MirrorTable $table, array $versions): void
+    {
+        if (! Family::isXtdb($table->connection)) {
+            throw new LogicException("Only a history database (XTDB) keeps every version: [{$table->connection->getName()}] keeps one row per key.");
+        }
+
+        if ($versions !== []) {
+            $this->xtdb->versions($table, $versions);
+        }
+    }
+
+    /**
+     * Empty the table (on XTDB: erase the rows and their history).
      */
     public function flush(MirrorTable $table): void
     {
-        $this->ensureSupported($table);
+        if (Family::isXtdb($table->connection)) {
+            $this->xtdb->flush($table);
+
+            return;
+        }
 
         $query = $table->connection->table($table->table);
 
@@ -180,12 +205,5 @@ class MirrorWriter
         }
 
         return $cached['types'];
-    }
-
-    protected function ensureSupported(MirrorTable $table): void
-    {
-        if (Family::isXtdb($table->connection)) {
-            throw new LogicException('XTDB mirrors are not supported yet.');
-        }
     }
 }

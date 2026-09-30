@@ -1,9 +1,10 @@
 # Mirrors: several databases in parallel
 
-> **Status: Phase 1 of [the plan](../plans/parallel-databases.md), in progress.** Implemented: owner models
-> (`#[MirroredAs]`, `Mirrored`), mirror models, the queue engine with `'versions' => 'latest'`, and the `mirror:*`
-> commands, tested on every pair of the conformance databases (SQLite, PostgreSQL, MySQL, CockroachDB, MatrixOne).
-> Coming next: XTDB history mirrors (`'versions' => 'all'`). Names may still change before the release.
+> **Status: Phase 1 of [the plan](../plans/parallel-databases.md).** Implemented: owner models (`#[MirroredAs]`,
+> `Mirrored`), mirror models, the queue engine and the `mirror:*` commands, tested on every pair of the conformance
+> databases (SQLite, PostgreSQL, MySQL, CockroachDB, MatrixOne); mirrors on XTDB, current state or every version
+> (`'versions' => 'all'`), are experimental: XTDB 2.2 and laravel-xtdb2 are pre-releases. Names may still change
+> before the release.
 
 An application keeps writing to the database it uses today, its **owner**, and keeps copies of chosen tables in
 other databases, its **mirrors**, to use what each does best: MatrixOne for analytics and search, XTDB for history
@@ -129,7 +130,7 @@ A mirror's settings, `mirrors.<name>`:
 | `enabled` | `true` | Turns this mirror off (see below). |
 | `queue_connection` | the default queue connection | The queue connection of the mirror's jobs. |
 | `queue` | the default queue | The queue of the mirror's jobs. |
-| `versions` | `latest` | `latest`: the rows' current state; `all`: every version, for history mirrors (XTDB, coming). See [Latest state or every version](#latest-state-or-every-version). |
+| `versions` | `latest` | `latest`: the rows' current state; `all`: every version, for history mirrors (XTDB). See [Latest state or every version](#latest-state-or-every-version). |
 | `erase_on_force_delete` | `false` | History mirrors: a force delete erases the row's history. |
 | `encrypt` | `false` | Encrypt the queued jobs. |
 
@@ -224,8 +225,9 @@ class Order extends MirrorModel
 - `MirrorModel::mirrorName()` and `MirrorModel::ownerClass()` tell where the model comes from.
 - A mirror of a soft-deleting owner keeps its soft-deleted rows, with their `deleted_at`: use `SoftDeletes` on the
   mirror model to hide them.
-- A history mirror model on XTDB (coming) also uses laravel-xtdb2's `Bitemporal` trait, for `history()`,
-  `asOfValidTime()` and `versions()`.
+- On XTDB, the key is `_id` (holding the owner's keys), and laravel-xtdb2's bitemporal query methods read the
+  history: `history()`, `asOfValidTime()`, `validBetween()`, `forAllValidTime()`. Its `Bitemporal` trait also writes
+  (`saveValidFrom()`, `deleteValidFrom()`, `erase()`): keep it off mirror models.
 - Mirror models are ordinary Eloquent models otherwise: scopes, casts, accessors and the mirror driver's builder
   methods (`timeWindow()` and `sample()` on MatrixOne, `readStale()` on CockroachDB). A custom Eloquent builder of a
   mirror model extends `DbPortable\Mirror\MirrorBuilder`.
@@ -300,8 +302,8 @@ Analytics\Order::with('customer', 'items')
     ->where('created_at', '>=', now()->subMonth())
     ->get();
 
-History\Order::whereKey($id)->history()->get();          // XTDB (coming): every version of an order
-History\Order::asOfValidTime('2026-03-01')->count();     // XTDB (coming): the orders as they were on March 1st
+History\Order::whereKey($id)->history()->get();          // XTDB: every version of an order, oldest first
+History\Order::asOfValidTime('2026-03-01')->count();     // XTDB: the orders as they were on March 1st
 ```
 
 Planned for Phase 2: `->fresh()` waits until the mirror has caught up with the owner's latest change, and
@@ -333,8 +335,13 @@ created / updated / deleted  ──after commit──▶  queue job      ──�
 | `versions` | The job carries | The mirror gets | Use it for |
 |---|---|---|---|
 | `latest` (default) | the model's class and key | the row as it is when the worker runs: five quick updates of one row make one write | analytics, search, reporting: mirrors that need the current state |
-| `all` (coming) | a copy of the row's attributes as committed | every committed version, each valid from its `validTime` column | history mirrors: XTDB only |
+| `all` | a copy of the row as committed, read back in the owner's transaction (database defaults included) | every committed version, each valid from its `validTime` column | history mirrors: XTDB only |
 
+- A version applied late (a retried job) only fills its own period, up to the next change already in the history: the
+  history ends right whatever the order the jobs run in. Versions with the same `validTime` (two updates in one second,
+  with second-precision timestamps) keep the last one applied: use `$table->timestamps(6)` for exact histories.
+- A soft delete is a version (with its `deleted_at`); a hard delete ends the row's validity at the time of the delete,
+  its history stays; a force delete erases the history when `erase_on_force_delete` is on (erasure requests).
 - Only a history database holds every version. PostgreSQL, MySQL, MatrixOne, CockroachDB and SQLite keep one row per
   key, where every version would end as the latest one, with more writes and weaker deletes: `'versions' => 'all'`
   on them is rejected.
@@ -351,8 +358,10 @@ created / updated / deleted  ──after commit──▶  queue job      ──�
 - Values are converted for the mirror as `db-portable:copy` does (booleans, JSON, dates without an offset, enums).
 - Columns the mirror table lacks are left out with a warning (an exception with `db-portable.strict`): an owner
   migration added them, `mirror:schema` adds them to the mirror.
-- A delete removes the mirror row (on XTDB, coming: ends its validity, the history stays; a force delete erases it
-  when `erase_on_force_delete` is on).
+- A delete removes the mirror row.
+- On XTDB (`versions: latest`), a write is an `INSERT` replacing the row from then on, unless the mirror holds a newer
+  version (read first); a delete ends the row's validity, its history stays. Keep the value types of a column stable:
+  XTDB returns a column of mixed types (text, then numbers) as JSON text.
 - A mirror on the owner's own connection and table is refused: it would write the owner's table.
 
 ## Commands
@@ -388,6 +397,7 @@ php artisan db-portable:mirror:schema analytics                # create or compl
   never dropped or changed, and the columns only on the mirror are reported.
 - After a change, the owner values are checked against the mirror columns as `db-portable:audit` does (strings too
   long, integers out of range).
+- On XTDB, a missing table is created with its column names (XTDB has no column types), and indexes are skipped.
 
 | Owner column | Mirror column |
 |---|---|
@@ -497,7 +507,7 @@ Analytics\OrderItem::join('orders', 'orders.id', '=', 'order_items.order_id')
     ->get();
 ```
 
-### Audit history in XTDB, for any owner (coming)
+### Audit history in XTDB, for any owner (experimental)
 
 ```php
 #[MirroredAs('history', History\Order::class)]
@@ -506,7 +516,7 @@ class Order extends Model { use Mirrored; }
 // config/db-portable.php: 'history' => ['connection' => 'xtdb', 'versions' => 'all', 'erase_on_force_delete' => true]
 
 // app/Models/History/Order.php
-class Order extends MirrorModel { use Bitemporal; }   // Bitemporal from laravel-xtdb2
+class Order extends MirrorModel {}
 
 History\Order::whereKey($order->id)->history()->get();   // every version, with _valid_from / _valid_to
 History\Order::asOfValidTime('2026-03-01')->get();      // the orders as they were on March 1st
@@ -539,4 +549,6 @@ make the new database the owner (the connection of the models) and, for a while,
 - Binary columns are copied as they are read: a PostgreSQL `bytea` mirror may reject bytes from another database.
 - The queue engine needs a cache store with locks (Laravel's default stores have them): jobs are unique per row while
   they wait, and two jobs of one row do not run at once.
-- XTDB mirrors depend on laravel-xtdb2 and XTDB 2.2, both pre-releases.
+- XTDB mirrors are experimental: they depend on laravel-xtdb2 and XTDB 2.2, both pre-releases, and are tested
+  against XTDB 2.2.0-beta3 outside CI. `mirror:stats --compare` shows `n/a` for the aggregates XTDB cannot compute
+  (`min()` over a column of mixed types).

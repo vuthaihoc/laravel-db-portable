@@ -1,8 +1,9 @@
 # Plan: databases working in parallel
 
-Status: Phase 1 in progress (2026-09-30): the mirror core (owner models, mirror models, the queue engine with
-`versions: latest`) and the `mirror:*` commands are implemented and tested on every pair of the conformance
-databases; XTDB history mirrors come next. The rest is a proposal.
+Status: Phase 1 done (2026-09-30): the mirror core (owner models, mirror models, the queue engine) and the `mirror:*`
+commands are implemented and tested on every pair of the conformance databases; XTDB mirrors (current state, and
+every version with `versions: all`) are experimental, tested against XTDB 2.2.0-beta3 outside CI. The rest is a
+proposal.
 
 ## Goal
 
@@ -233,7 +234,7 @@ class Order extends MirrorModel            // the connection is the mirror's (co
 - The table, key, key type and casts follow the owner model.
 - `$mirrorOrder->ownerModel` is a relation to the owner row, read in the owner database (not `owner()`: a common
   relation name); `MirrorModel::mirrorName()` and `::ownerClass()` come from the registry.
-- A history mirror model (XTDB) also uses laravel-xtdb2's `Bitemporal`: `History\Order::whereKey($id)->history()`.
+- A history mirror model (XTDB) reads its history with laravel-xtdb2's query methods: `History\Order::whereKey($id)->history()`; its key is `_id`.
 
 ### Relations
 
@@ -319,7 +320,7 @@ about its table, then compares what the two have in common:
 | Phase | Content | Size |
 |---|---|---|
 | 0. Spikes | Prove the risky parts before designing APIs: (a) queue mirror MySQL/PG → MatrixOne and → XTDB with a version guard; (b) CockroachDB webhook changefeed → HTTPS receiver in Laravel (payload, `resolved`, dedupe); (c) PostgreSQL logical slot polled from PHP (`test_decoding` / `wal2json`, deletes with replica identity); (d) MatrixOne CDC lifecycle from Laravel (PITR, `mo_cdc_task` status, MatrixOne → MySQL sink); (e) XTDB `ATTACH` a PostgreSQL 17 source in docker compose | S each |
-| 1. Mirror core (queue engine) | ✅ `#[MirroredAs]` declarations and per-mirror settings in `config('db-portable.mirrors')` (with switches per mirror, per owner model and global), `Mirrored` trait, registry, `MirrorModel` (read-only; relations to mirror models and to owner models, the latter kept on the owner connection; `fromOwner()`, `ownerQuery()`, `mirrorSchema()`), observer + queue engine (`versions: latest`), `MirrorWriter` for the PostgreSQL, MySQL and SQLite families, `ValueMapper` from `Copier`, docs (`docs/docs/mirrors.md`), `mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync`, `mirror:flush`, **mirror conformance tests** over the 21 owner × mirror pairs (queue engine and commands). Next: XTDB history mirrors (`versions: all`, valid time, erase) through a driver contract | L |
+| 1. Mirror core (queue engine) | ✅ `#[MirroredAs]` declarations and per-mirror settings in `config('db-portable.mirrors')` (with switches per mirror, per owner model and global), `Mirrored` trait, registry, `MirrorModel` (read-only; relations to mirror models and to owner models, the latter kept on the owner connection; `fromOwner()`, `ownerQuery()`, `mirrorSchema()`), observer + queue engine (`versions: latest`), `MirrorWriter` for the PostgreSQL, MySQL and SQLite families, `ValueMapper` from `Copier`, docs (`docs/docs/mirrors.md`), `mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync`, `mirror:flush`, **mirror conformance tests** over the 21 owner × mirror pairs (queue engine and commands). XTDB mirrors, experimental (`XtdbWriter`, in XTDB SQL through laravel-xtdb2's connection: `INSERT` with `_valid_from` / `_valid_to` bounded by the next change in the history, `DELETE ... FOR PORTION OF VALID_TIME`, `ERASE`; a driver contract can replace it once XTDB 2.2 is released) | L |
 | 2. Query side | mirror state table, `fresh()` / `orOwner()`, XTDB history sugar, Scout mirror engine | M |
 | 3. Poll engine | watermark pull (`updated_at`, CockroachDB MVCC timestamp, PostgreSQL slot), soft deletes and key reconciliation, scheduling | M |
 | 4. Native CDC and replication | contracts + implementations: MatrixOne `CREATE CDC` (MatrixOne/MySQL sinks), CockroachDB changefeeds (webhook receiver; Kafka later), PostgreSQL publication/subscription and slots, XTDB external sources (generated `ATTACH` + node YAML + PostgreSQL setup), MySQL replication commands (generated) | L |

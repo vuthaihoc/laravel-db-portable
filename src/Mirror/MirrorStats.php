@@ -34,6 +34,9 @@ class MirrorStats
     /** Rows whose keys are compared one by one when the key is not an integer. */
     protected const MAX_KEYS = 100000;
 
+    /** An aggregate the database could not compute (e.g. min() of mixed types on XTDB). */
+    protected const FAILED = "\0failed";
+
     public function __construct(
         protected MirrorRegistry $registry,
         protected MirrorSync $sync,
@@ -109,7 +112,7 @@ class MirrorStats
             ->cloneWithoutBindings(['select', 'order']);
 
         if ($compare) {
-            $differs = $this->compare($ownerRows, $ownerTable, $table, $shared, $ownerModel, $rows);
+            $differs = $this->compare($ownerRows, $ownerTable, $table, $shared, $ownerModel, $rows, $notes);
         }
 
         if ($keys) {
@@ -338,9 +341,10 @@ class MirrorStats
      *
      * @param  array<string, array{0: string, 1: array<string, mixed>, 2: array<string, mixed>}>  $shared  owner column => [mirror column, owner definition, mirror definition]
      * @param  list<Row>  $rows
+     * @param  list<string>  $notes
      * @return bool whether the sides differ
      */
-    protected function compare(QueryBuilder $ownerRows, string $ownerTable, MirrorTable $table, array $shared, Model $owner, array &$rows): bool
+    protected function compare(QueryBuilder $ownerRows, string $ownerTable, MirrorTable $table, array $shared, Model $owner, array &$rows, array &$notes): bool
     {
         /** @var Connection $ownerConnection */
         $ownerConnection = $ownerRows->getConnection();
@@ -386,11 +390,18 @@ class MirrorStats
             }
         }
 
-        $ownerValues = $this->aggregate(clone $ownerRows, $ownerSelects);
-        $mirrorValues = $this->aggregate($table->connection->table($table->table), $mirrorSelects);
+        $ownerValues = $this->aggregate(clone $ownerRows, $ownerSelects, $notes, 'owner');
+        $mirrorValues = $this->aggregate($table->connection->table($table->table), $mirrorSelects, $notes, 'mirror');
         $differs = false;
 
         foreach ($labels as $index => $label) {
+            if ($ownerValues[$index] === self::FAILED || $mirrorValues[$index] === self::FAILED) {
+                $rows[] = [$label, $ownerValues[$index] === self::FAILED ? 'n/a' : $this->normalize($ownerValues[$index], $kinds[$index]),
+                    $mirrorValues[$index] === self::FAILED ? 'n/a' : $this->normalize($mirrorValues[$index], $kinds[$index]), ''];
+
+                continue;
+            }
+
             [$ownerValue, $mirrorValue] = [$this->normalize($ownerValues[$index], $kinds[$index]), $this->normalize($mirrorValues[$index], $kinds[$index])];
             $note = '';
 
@@ -494,15 +505,35 @@ class MirrorStats
     }
 
     /**
+     * The aggregates in one query; when it fails, one by one, those that fail being FAILED
+     * (with a note).
+     *
      * @param  list<string>  $selects
+     * @param  list<string>  $notes
      * @return list<mixed>
      */
-    protected function aggregate(QueryBuilder $rows, array $selects): array
+    protected function aggregate(QueryBuilder $rows, array $selects, array &$notes, string $side): array
     {
         $aliases = array_map(fn (string $select, int $index) => "{$select} as a{$index}", $selects, array_keys($selects));
-        $row = (array) $rows->selectRaw(implode(', ', $aliases))->first();
 
-        return array_map(fn (int $index) => $row["a{$index}"] ?? null, array_keys($selects));
+        try {
+            $row = (array) (clone $rows)->selectRaw(implode(', ', $aliases))->first();
+
+            return array_map(fn (int $index) => $row["a{$index}"] ?? null, array_keys($selects));
+        } catch (Throwable) {
+            $values = [];
+
+            foreach ($aliases as $index => $alias) {
+                try {
+                    $values[] = ((array) (clone $rows)->selectRaw($alias)->first())["a{$index}"] ?? null;
+                } catch (Throwable $e) {
+                    $values[] = self::FAILED;
+                    $notes[] = "Not compared on the {$side}: {$selects[$index]}: ".$this->short($e);
+                }
+            }
+
+            return $values;
+        }
     }
 
     /**

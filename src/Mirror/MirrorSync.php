@@ -5,9 +5,12 @@ namespace DbPortable\Mirror;
 use DateTimeInterface;
 use DbPortable\Mirror\Attributes\MirroredAs;
 use DbPortable\Mirror\Jobs\MirrorKeys;
+use DbPortable\Mirror\Jobs\MirrorVersions;
+use DbPortable\Support\ValueMapper;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Contracts\Cache\Repository as Cache;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -15,9 +18,12 @@ use LogicException;
 use Throwable;
 
 /**
- * Queues the changes of owner models for their mirrors, and applies them.
+ * Queues the changes of owner models for their mirrors, and applies them: the rows'
+ * current state (versions "latest", MirrorKeys jobs), or every version (versions "all",
+ * history mirrors, MirrorVersions jobs).
  *
  * @phpstan-import-type MirrorConfig from MirrorRegistry
+ * @phpstan-import-type Version from XtdbWriter
  */
 class MirrorSync
 {
@@ -37,11 +43,22 @@ class MirrorSync
             return;
         }
 
-        foreach (array_keys($this->registry->mirrorsOf($model)) as $mirror) {
+        foreach ($this->registry->mirrorsOf($model) as $mirror => $declaration) {
             $config = $this->registry->active($mirror, $model::class);
 
             // A new row that is not mirrored has nothing to remove from the mirror.
             if ($config === null || ($event === 'created' && ! $this->shouldMirror($model, $mirror))) {
+                continue;
+            }
+
+            if ($config['versions'] === MirrorRegistry::ALL) {
+                // The version as committed, read now, in the owner's transaction.
+                $version = $event === 'forceDeleted' && $config['erase_on_force_delete']
+                    ? ['key' => $model->getKey(), 'row' => null, 'at' => $this->now(), 'erase' => true]
+                    : $this->versions($mirror, $declaration, $model::class, [$model->getKey()])[0];
+
+                $this->dispatch(new MirrorVersions($mirror, $model::class, [$version]), $mirror, $config);
+
                 continue;
             }
 
@@ -82,7 +99,13 @@ class MirrorSync
                 $keys = array_values($models->modelKeys());
 
                 foreach ($configs as $mirror => $config) {
-                    $this->dispatch(new MirrorKeys($mirror, $model::class, $keys, $remove ? MirrorKeys::REMOVE : MirrorKeys::SYNC), $mirror, $config);
+                    $job = match (true) {
+                        $config['versions'] === MirrorRegistry::LATEST => new MirrorKeys($mirror, $model::class, $keys, $remove ? MirrorKeys::REMOVE : MirrorKeys::SYNC),
+                        $remove => new MirrorVersions($mirror, $model::class, array_map(fn ($key) => ['key' => $key, 'row' => null, 'at' => $this->now()], $keys)),
+                        default => new MirrorVersions($mirror, $model::class, $this->versions($mirror, $this->declaration($mirror, $model::class), $model::class, $keys)),
+                    };
+
+                    $this->dispatch($job, $mirror, $config);
                 }
             },
             $model->qualifyColumn($key),
@@ -167,8 +190,28 @@ class MirrorSync
     }
 
     /**
+     * Apply a MirrorVersions job: the versions of owner rows, to a history mirror.
+     *
+     * @param  class-string<Model>  $owner
+     * @param  list<Version>  $versions
+     */
+    public function applyVersions(string $mirror, string $owner, array $versions): void
+    {
+        $declaration = $this->declaration($mirror, $owner);
+
+        // Turned off since the job was queued.
+        if ($this->registry->active($mirror, $owner) === null) {
+            return;
+        }
+
+        $this->registry->check($mirror);
+        $this->writer->versions(MirrorTable::of($declaration->model), $versions);
+    }
+
+    /**
      * Write the owner rows (those changed since $since) to a mirror in key order, as the
-     * jobs do: the rows shouldMirror() leaves out are deleted from the mirror.
+     * jobs do: the rows shouldMirror() leaves out are deleted from the mirror. A history
+     * mirror gets each row as a version valid from its validTime column.
      *
      * @param  class-string<Model>  $owner
      * @param  (callable(int, int): void)|null  $progress  called after each chunk with the rows written and deleted so far
@@ -176,7 +219,9 @@ class MirrorSync
      */
     public function backfill(string $mirror, string $owner, ?DateTimeInterface $since = null, int $chunk = 500, ?callable $progress = null): array
     {
-        $mirrorModel = $this->declaration($mirror, $owner)->model;
+        $declaration = $this->declaration($mirror, $owner);
+        $mirrorModel = $declaration->model;
+        $history = $this->registry->config($mirror)['versions'] === MirrorRegistry::ALL;
         $this->registry->check($mirror);
         $table = MirrorTable::of($mirrorModel);
         /** @var Model $model */
@@ -185,7 +230,20 @@ class MirrorSync
 
         $this->ownerQuery($mirrorModel, $owner, $since)->chunkById(
             $chunk,
-            function (Collection $models) use ($mirror, $mirrorModel, $table, $progress, &$written, &$deleted) {
+            function (Collection $models) use ($mirror, $declaration, $mirrorModel, $table, $history, $progress, &$written, &$deleted) {
+                if ($history) {
+                    $versions = array_values(array_map(fn (Model $owned) => $this->versionOf($mirror, $declaration, $owned, $owned->getKey()), $models->all()));
+                    $this->writer->versions($table, $versions);
+                    $written += count(array_filter($versions, fn (array $version) => $version['row'] !== null));
+                    $deleted += count(array_filter($versions, fn (array $version) => $version['row'] === null));
+
+                    if ($progress !== null) {
+                        $progress($written, $deleted);
+                    }
+
+                    return;
+                }
+
                 $rows = $gone = [];
 
                 foreach ($models as $owned) {
@@ -304,26 +362,77 @@ class MirrorSync
     }
 
     /**
+     * The versions of owner rows a history mirror gets, read now.
+     *
+     * @param  class-string<Model>  $owner
+     * @param  list<int|string>  $keys
+     * @return list<Version>
+     */
+    protected function versions(string $mirror, MirroredAs $declaration, string $owner, array $keys): array
+    {
+        $rows = $this->ownerRows($declaration->model, $owner, $keys)->keyBy(fn (Model $row) => (string) $row->getKey());
+
+        return array_map(fn (int|string $key) => $this->versionOf($mirror, $declaration, $rows->get((string) $key), $key), $keys);
+    }
+
+    /**
+     * The row valid from its validTime column, or the end of its validity when it is gone
+     * or no longer mirrored.
+     *
+     * @return Version
+     */
+    protected function versionOf(string $mirror, MirroredAs $declaration, ?Model $row, int|string $key): array
+    {
+        if ($row === null || ! $this->shouldMirror($row, $mirror)) {
+            return ['key' => $key, 'row' => null, 'at' => $row === null ? $this->now() : $this->validTime($row, $declaration)];
+        }
+
+        $table = MirrorTable::of($declaration->model);
+
+        return [
+            'key' => $key,
+            'row' => (new ValueMapper($table->connection))->row($this->row($mirror, $declaration->model, $row, $table)),
+            'at' => $this->validTime($row, $declaration),
+        ];
+    }
+
+    protected function validTime(Model $row, MirroredAs $declaration): string
+    {
+        $value = $row->getAttributes()[$declaration->validTime] ?? null;
+
+        return match (true) {
+            $value instanceof DateTimeInterface => $value->format('Y-m-d H:i:s.u'),
+            is_string($value) && $value !== '' => $value,
+            default => $this->now(),
+        };
+    }
+
+    protected function now(): string
+    {
+        return now()->format('Y-m-d H:i:s.u');
+    }
+
+    /**
      * @param  MirrorConfig  $config
      */
-    protected function dispatch(MirrorKeys $job, string $mirror, array $config): void
+    protected function dispatch(MirrorKeys|MirrorVersions $job, string $mirror, array $config): void
     {
         $this->registry->check($mirror);
 
         $job->onConnection($config['queue_connection'])->onQueue($config['queue']);
         $job->shouldBeEncrypted = $config['encrypt'];
 
-        $lock = new UniqueLock(app(Cache::class));
+        $lock = $job instanceof ShouldBeUnique ? new UniqueLock(app(Cache::class)) : null;
 
         // A waiting job for the same rows already brings their next state.
-        if (! $lock->acquire($job)) {
+        if ($lock !== null && ! $lock->acquire($job)) {
             return;
         }
 
         try {
             app(Dispatcher::class)->dispatch($job);
         } catch (Throwable $e) {
-            $lock->release($job);
+            $lock?->release($job);
 
             throw $e;
         }
