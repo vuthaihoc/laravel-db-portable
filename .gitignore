@@ -4,3 +4,7 @@ composer.lock
 phpunit.xml
 /.idea
 /.vscode
+/node_modules
+/docs/node_modules
+/docs/.vitepress/dist
+/docs/.vitepress/cache
