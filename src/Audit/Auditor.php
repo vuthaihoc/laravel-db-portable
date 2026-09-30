@@ -112,7 +112,9 @@ class Auditor
             } elseif ($integers && str_contains($type, 'unsigned')) {
                 $checks[] = ['integer', $name, 0, null, $type];
                 $selects[] = "min({$wrapped}) as ".$this->alias('min', $name);
-            } elseif (preg_match('/^(var)?char(acter)?( varying)?\((\d+)\)/', $type, $matches)) {
+            } elseif (preg_match('/^(var)?char(acter)?( varying)?\((\d+)\)/', $type, $matches)
+                // Only text has a length: a uuid source (char(36) on the MySQL family) has none to take.
+                && preg_match('/char|text|string|clob/', strtolower((string) $sourceColumn['type_name']))) {
                 $checks[] = ['string', $name, null, (int) $matches[4], $type];
                 $selects[] = 'max('.$dialect->charLength($name).') as '.$this->alias('len', $name);
             }

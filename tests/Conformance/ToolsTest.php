@@ -33,6 +33,7 @@ class ToolsTest extends TestCase
             $table->json('meta')->nullable();
             $table->string('legacy')->nullable();
             $table->timestampTz('published_at')->nullable();
+            $table->uuid('ref')->nullable();
         });
         Schema::connection('crdb')->create('tool_only_source', fn (Blueprint $table) => $table->id());
 
@@ -45,6 +46,7 @@ class ToolsTest extends TestCase
             $table->boolean('is_public')->default(true);
             $table->json('meta')->nullable();
             $table->dateTime('published_at', 6)->nullable();
+            $table->char('ref', 36)->nullable();
         });
 
         DB::connection('crdb')->table('tool_videos')->insert([
