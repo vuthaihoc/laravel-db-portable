@@ -1,6 +1,6 @@
 {
     "name": "vuthaihoc/laravel-db-portable",
-    "description": "Portable query builder helpers for JSON numbers, NULLS LAST and JSON counters across PostgreSQL/CockroachDB, MySQL/MariaDB/MatrixOne and SQLite, plus scan, audit and copy tools for switching database drivers",
+    "description": "Portable Laravel query builder and schema helpers for PostgreSQL/CockroachDB, MySQL/MariaDB/MatrixOne and SQLite (whereFullText() on SQLite with FTS5), tools to switch databases (scan, audit, copy), and mirrors keeping chosen tables in other databases through the queue (analytics, XTDB history)",
     "keywords": [
         "laravel",
         "database",
@@ -10,7 +10,12 @@
         "matrixone",
         "mysql",
         "postgresql",
-        "migration"
+        "migration",
+        "sqlite",
+        "fulltext",
+        "fts5",
+        "mirror",
+        "xtdb"
     ],
     "homepage": "https://github.com/vuthaihoc/laravel-db-portable",
     "license": "MIT",
@@ -44,7 +49,8 @@
     "suggest": {
         "vuthaihoc/laravel-matrixone": "MatrixOne database driver (implements the historical reads and search contracts)",
         "vuthaihoc/cockroachdb-laravel": "CockroachDB database driver (implements the historical reads and search contracts)",
-        "laravel/scout": "db-portable:search-indexes checks and migrates the indexes of Scout models"
+        "laravel/scout": "db-portable:search-indexes checks and migrates the indexes of Scout models",
+        "vuthaihoc/laravel-xtdb2": "XTDB database driver: mirrors that keep every version of a row (experimental)"
     },
     "autoload": {
         "psr-4": {
