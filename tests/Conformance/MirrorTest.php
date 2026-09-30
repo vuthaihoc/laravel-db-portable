@@ -22,24 +22,6 @@ class MirrorTest extends TestCase
 {
     use MirrorTables;
 
-    /**
-     * @return array<string, array{string, string}>
-     */
-    public static function pairs(): array
-    {
-        $pairs = [];
-
-        foreach (['sqlite', 'pgsql', 'mysql', 'crdb', 'matrixone'] as $owner) {
-            foreach (['sqlite_mirror', 'pgsql', 'mysql', 'crdb', 'matrixone'] as $mirror) {
-                if ($owner !== $mirror) {
-                    $pairs["{$owner} → {$mirror}"] = [$owner, $mirror];
-                }
-            }
-        }
-
-        return $pairs;
-    }
-
     protected function tearDown(): void
     {
         $this->dropMirrorTables();

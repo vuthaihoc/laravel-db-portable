@@ -113,6 +113,21 @@ class MirrorRegistry
     }
 
     /**
+     * A mirror of an owner model in this environment: on, off (a switch), or not configured.
+     *
+     * @param  class-string<Model>  $owner
+     * @return 'on'|'off'|'unconfigured'
+     */
+    public function state(string $mirror, string $owner): string
+    {
+        if ($this->configured($mirror) === null) {
+            return 'unconfigured';
+        }
+
+        return $this->enabled($owner) && $this->config($mirror)['enabled'] ? 'on' : 'off';
+    }
+
+    /**
      * Whether an owner model is mirrored in this environment: mirrors.enabled, then
      * mirrors.models per owner model.
      *

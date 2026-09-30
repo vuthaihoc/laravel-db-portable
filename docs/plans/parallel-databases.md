@@ -1,8 +1,8 @@
 # Plan: databases working in parallel
 
 Status: Phase 1 in progress (2026-09-30): the mirror core (owner models, mirror models, the queue engine with
-`versions: latest`) is implemented and tested on every pair of the conformance databases; the `mirror:*` commands and
-XTDB history mirrors come next. The rest is a proposal.
+`versions: latest`) and the `mirror:*` commands are implemented and tested on every pair of the conformance
+databases; XTDB history mirrors come next. The rest is a proposal.
 
 ## Goal
 
@@ -275,11 +275,11 @@ relations. The target decides where related rows are read:
 
 | Command | What it does |
 |---|---|
-| `db-portable:mirror:schema {mirror?} {--model=*} {--dry-run} {--migration}` | Compares each owner table with its mirror table and creates or alters the mirror table: columns mapped across families (the `Auditor` type checks: widths, integer ranges, JSON), the mirror model's `mirrorSchema()` additions (portable indexes such as `trigramIndex()`, full-text, vector), no foreign keys; XTDB mirrors get `CREATE TABLE (columns)`. `--migration` writes a migration for the mirror connection instead of running the DDL. |
-| `db-portable:mirror:data {mirror?} {--model=*} {--since=} {--chunk=500} {--queue} {--prune} {--dry-run}` | Backfills or catches up: keyset batches read from the owner (the `Copier` reader and value mapping) and written by the `MirrorWriter` (upserts with the version guard). `--since` limits to rows changed after a time, `--queue` spreads the batches over queue workers, `--prune` removes mirror rows whose key no longer exists on the owner. |
-| `db-portable:mirror:stats {mirror?} {--model=*} {--compare} {--keys} {--json}` | A quick look at whether the two tables differ (see [mirror:stats](#mirrorstats)): each side's own statistics as its server provides them, then, with `--compare`, exact aggregates over the key and the columns both sides share, and with `--keys`, the key ranges and keys that differ. Also the watermark and lag, queued and failed jobs, and relations pointing to missing mirror tables. |
-| `db-portable:mirror:sync {mirror?} {--model=*}` | `schema`, then `data`, then `stats`: one command for a new mirror, or after a deployment that changed the owner schema. |
-| `db-portable:mirror:flush {mirror} {--model=*}` | Empties the mirror tables (`ERASE` on XTDB). |
+| `db-portable:mirror:schema {mirror?} {--model=*} {--dry-run} {--migration} {--path=} {--force}` | ✅ Creates or completes each mirror table (`Mirror\Schema\MirrorSchema`): the columns of the mirrored rows (owner columns, or those of `fromOwner()` from a sample row) mapped across families by `ColumnMapper` (casts complete what the column types do not tell), the mirror model's `mirrorSchema()`, no foreign keys, missing columns and indexes added to existing tables, then the `Auditor` value checks (widths, integer ranges). `--migration` writes a migration for the mirror connection instead of running the DDL. XTDB mirrors (`CREATE TABLE (columns)`) come with the XTDB step. |
+| `db-portable:mirror:data {mirror?} {--model=*} {--since=} {--chunk=500} {--queue} {--prune} {--dry-run} {--force}` | ✅ Backfills or catches up: keyset batches of the mirror model's `ownerQuery()` written by the `MirrorWriter` (upserts with the version guard; equal versions overwrite, so raw updates are repaired). `--since` limits to rows changed after a time, `--queue` dispatches the batches as jobs, `--prune` removes mirror rows whose owner row is gone. |
+| `db-portable:mirror:stats {mirror?} {--model=*} {--compare} {--keys} {--json}` | ✅ A quick look at whether the two tables differ (see [mirror:stats](#mirrorstats)): each side's own statistics as its server provides them, then, with `--compare`, exact aggregates over the owner rows of `ownerQuery()` and the mirror table, and with `--keys`, the key ranges and keys that differ. Also queued and failed jobs, relations pointing to missing or empty mirror tables, and the columns on one side only. Fails when the sides differ. |
+| `db-portable:mirror:sync {mirror?} {--model=*} {--force}` | ✅ `schema`, then `data`, then `stats`: one command for a new mirror, or after a deployment that changed the owner schema. |
+| `db-portable:mirror:flush {mirror} {--model=*} {--force}` | ✅ Empties the mirror tables (asks first in production). `ERASE` on XTDB with the XTDB step. |
 
 ### mirror:stats
 
@@ -319,7 +319,7 @@ about its table, then compares what the two have in common:
 | Phase | Content | Size |
 |---|---|---|
 | 0. Spikes | Prove the risky parts before designing APIs: (a) queue mirror MySQL/PG → MatrixOne and → XTDB with a version guard; (b) CockroachDB webhook changefeed → HTTPS receiver in Laravel (payload, `resolved`, dedupe); (c) PostgreSQL logical slot polled from PHP (`test_decoding` / `wal2json`, deletes with replica identity); (d) MatrixOne CDC lifecycle from Laravel (PITR, `mo_cdc_task` status, MatrixOne → MySQL sink); (e) XTDB `ATTACH` a PostgreSQL 17 source in docker compose | S each |
-| 1. Mirror core (queue engine) | ✅ `#[MirroredAs]` declarations and per-mirror settings in `config('db-portable.mirrors')` (with switches per mirror, per owner model and global), `Mirrored` trait, registry, `MirrorModel` (read-only; relations to mirror models and to owner models, the latter kept on the owner connection; `fromOwner()`, `ownerQuery()`, `mirrorSchema()`), observer + queue engine (`versions: latest`), `MirrorWriter` for the PostgreSQL, MySQL and SQLite families, `ValueMapper` from `Copier`, docs (`docs/mirrors.md`), **mirror conformance tests** over the 21 owner × mirror pairs. Next: `mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync`, `mirror:flush`; then XTDB history mirrors (`versions: all`, valid time, erase) through a driver contract | L |
+| 1. Mirror core (queue engine) | ✅ `#[MirroredAs]` declarations and per-mirror settings in `config('db-portable.mirrors')` (with switches per mirror, per owner model and global), `Mirrored` trait, registry, `MirrorModel` (read-only; relations to mirror models and to owner models, the latter kept on the owner connection; `fromOwner()`, `ownerQuery()`, `mirrorSchema()`), observer + queue engine (`versions: latest`), `MirrorWriter` for the PostgreSQL, MySQL and SQLite families, `ValueMapper` from `Copier`, docs (`docs/mirrors.md`), `mirror:schema`, `mirror:data`, `mirror:stats`, `mirror:sync`, `mirror:flush`, **mirror conformance tests** over the 21 owner × mirror pairs (queue engine and commands). Next: XTDB history mirrors (`versions: all`, valid time, erase) through a driver contract | L |
 | 2. Query side | mirror state table, `fresh()` / `orOwner()`, XTDB history sugar, Scout mirror engine | M |
 | 3. Poll engine | watermark pull (`updated_at`, CockroachDB MVCC timestamp, PostgreSQL slot), soft deletes and key reconciliation, scheduling | M |
 | 4. Native CDC and replication | contracts + implementations: MatrixOne `CREATE CDC` (MatrixOne/MySQL sinks), CockroachDB changefeeds (webhook receiver; Kafka later), PostgreSQL publication/subscription and slots, XTDB external sources (generated `ATTACH` + node YAML + PostgreSQL setup), MySQL replication commands (generated) | L |

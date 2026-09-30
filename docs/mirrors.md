@@ -1,9 +1,9 @@
 # Mirrors: several databases in parallel
 
 > **Status: Phase 1 of [the plan](plans/parallel-databases.md), in progress.** Implemented: owner models
-> (`#[MirroredAs]`, `Mirrored`), mirror models, and the queue engine with `'versions' => 'latest'`, tested on every pair of
-> the conformance databases (SQLite, PostgreSQL, MySQL, CockroachDB, MatrixOne). Coming next: the `mirror:*`
-> commands, then XTDB history mirrors (`'versions' => 'all'`). Names may still change before the release.
+> (`#[MirroredAs]`, `Mirrored`), mirror models, the queue engine with `'versions' => 'latest'`, and the `mirror:*`
+> commands, tested on every pair of the conformance databases (SQLite, PostgreSQL, MySQL, CockroachDB, MatrixOne).
+> Coming next: XTDB history mirrors (`'versions' => 'all'`). Names may still change before the release.
 
 An application keeps writing to the database it uses today, its **owner**, and keeps copies of chosen tables in
 other databases, its **mirrors**, to use what each does best: MatrixOne for analytics and search, XTDB for history
@@ -55,9 +55,10 @@ class Order extends MirrorModel
 ],
 ```
 
-The mirror table needs the owner's columns, with the owner's key as its (not auto-incrementing) primary key. Until
-`mirror:schema` creates it, create it with a migration on the mirror connection; then copy the existing rows with
-`Order::query()->mirrorable()` (soon `mirror:sync analytics`), and run a queue worker.
+```bash
+php artisan db-portable:mirror:sync analytics    # create the mirror tables, copy the rows, show both sides
+php artisan queue:work                           # the jobs that keep the mirror up to date
+```
 
 ```php
 // Paid revenue per day, computed by MatrixOne: one row per day (_wstart, _wend, paid)
@@ -145,7 +146,7 @@ A mirror's settings, `mirrors.<name>`:
 - An owner model reaches a mirror when `mirrors.enabled` is true, the mirror's `enabled` is true, and the owner model
   is not `false` in `mirrors.models`.
 - Off: no job is queued, `mirrorable()` does nothing, and jobs already queued do nothing when they run. Changes made
-  while off do not reach the mirrors: run `mirrorable()` (soon `mirror:data`) once mirroring is on again.
+  while off do not reach the mirrors: run `mirror:data` once mirroring is on again.
 - Mirror models still read their tables.
 - Tests switch it at runtime (`config(['db-portable.mirrors.enabled' => false])`); `Order::withoutMirroring(fn () => ...)`
   pauses one model for a block of code.
@@ -167,7 +168,9 @@ class Order extends Model
 ```
 
 - `shouldMirror(string $mirror): bool` decides whether a row belongs in a mirror: a row that stops belonging is
-  removed from it.
+  removed from it. Express the same filter in the mirror model's `ownerQuery()` too (`where('status', '!=',
+  'draft')`): `mirror:data --prune` and `mirror:stats` read the owner rows through it, and would otherwise count the
+  rows left out as missing.
 - `toMirrorArray(string $mirror): array` returns the row written to a mirror: the model's raw attributes by default.
   A mirror model's `fromOwner()` takes precedence.
 - Updates that bypass Eloquent events (`Order::where(...)->update(...)`, `DB::table()`) are not seen: call
@@ -195,13 +198,13 @@ class Order extends MirrorModel
         return $order->only('id', 'customer_id', 'status', 'total', 'created_at', 'updated_at');
     }
 
-    // Optional: the query loading the owner rows, with what fromOwner() reads.
+    // Optional: the owner rows of this mirror, loaded with what fromOwner() reads.
     public static function ownerQuery(Builder $query): Builder
     {
-        return $query->with('customer');
+        return $query->with('customer')->where('status', '!=', 'draft');
     }
 
-    // Optional: mirror-only schema, for mirror:schema (coming).
+    // Optional: mirror-only schema, for mirror:schema.
     public static function mirrorSchema(Blueprint $table): void
     {
         $table->trigramIndex('status');
@@ -283,7 +286,7 @@ Analytics\Order::groupBy('customer_country')->selectRaw('customer_country, sum(t
 ```
 
 - Copied fields keep the value they had when the row was mirrored (the customer's country when the order was
-  written), which is often what analytics want; `mirrorable()` (soon `mirror:data`) rewrites the rows when they
+  written), which is often what analytics want; `mirror:data` rewrites the rows when they
   should follow later changes.
 - Reading related rows from the owner suits pages of results; for exports of millions of rows, copy the fields or
   mirror the table, so the owner database does not serve the related rows.
@@ -342,48 +345,81 @@ created / updated / deleted  ──after commit──▶  queue job      ──�
   `insert ... on duplicate key update col = if(...)`.
 - Values are converted for the mirror as `db-portable:copy` does (booleans, JSON, dates without an offset, enums).
 - Columns the mirror table lacks are left out with a warning (an exception with `db-portable.strict`): an owner
-  migration added them, `mirror:schema` (coming) adds them to the mirror.
+  migration added them, `mirror:schema` adds them to the mirror.
 - A delete removes the mirror row (on XTDB, coming: ends its validity, the history stays; a force delete erases it
   when `erase_on_force_delete` is on).
 - A mirror on the owner's own connection and table is refused: it would write the owner's table.
 
-## Commands (coming next)
+## Commands
 
-The next step of Phase 1. Until then, `mirrorable()` backfills and repairs, and the mirror tables are created with
-migrations.
+```bash
+php artisan db-portable:mirror:schema {mirror?}   # create or complete the mirror tables
+php artisan db-portable:mirror:data {mirror?}     # write the owner rows to the mirrors
+php artisan db-portable:mirror:stats {mirror?}    # compare both sides
+php artisan db-portable:mirror:sync {mirror?}     # schema, then data, then stats
+php artisan db-portable:mirror:flush {mirror}     # empty the mirror tables
+```
+
+Every command works on the owner models mirrored in `{mirror}` (every mirror when left out), or on those of
+`--model=Order` (a class, or its basename; repeatable). A mirror missing from the configuration is skipped, and so is
+a mirror turned off unless `--force` is given.
 
 ### mirror:schema
 
 ```bash
-php artisan db-portable:mirror:schema analytics --dry-run      # the DDL, without running it
-php artisan db-portable:mirror:schema analytics --migration    # write a migration for the mirror connection
-php artisan db-portable:mirror:schema analytics                # create or alter the mirror tables
+php artisan db-portable:mirror:schema analytics --dry-run      # the SQL, without running it
+php artisan db-portable:mirror:schema analytics --migration    # write a migration for the mirror connection (--path=)
+php artisan db-portable:mirror:schema analytics                # create or complete the mirror tables
 ```
 
-Compares each owner table with its mirror table and creates or alters the mirror table: the columns of the mirrored
-rows mapped to the mirror's types (the same checks as `db-portable:audit`: string widths, integer ranges, JSON), plus
-the mirror model's `mirrorSchema()` (portable indexes such as `trigramIndex()`, full-text or vector indexes). No
-foreign keys. XTDB mirrors get `CREATE TABLE (columns)`. A column dropped on the owner stays on the mirror and is
-reported by `mirror:stats`.
+- The columns are those of the rows written to the mirror: the owner table's, or, with `fromOwner()` or
+  `toMirrorArray()`, those of the row made for the first owner row. Each is mapped from the owner column to the
+  mirror's database (below); a column `fromOwner()` computes gets a type from its sample value. The mirror model's
+  `mirrorSchema()` comes on top, and the columns it declares win.
+- The key is the primary key, never auto-incrementing; every other column is nullable (the owner enforces its
+  constraints). No foreign keys, and no owner indexes: `mirrorSchema()` adds the indexes the mirror needs.
+- On an existing table, the missing columns and the `mirrorSchema()` indexes it lacks (by name) are added; a column is
+  never dropped or changed, and the columns only on the mirror are reported.
+- After a change, the owner values are checked against the mirror columns as `db-portable:audit` does (strings too
+  long, integers out of range).
+
+| Owner column | Mirror column |
+|---|---|
+| boolean: `bool`, `tinyint(1)`, or a `boolean` cast (MatrixOne stores booleans as `tinyint`) | `boolean` |
+| JSON: `json`, `jsonb`, or an `array` / `json` / `object` / `collection` cast (SQLite stores JSON as `text`) | `jsonb` on the PostgreSQL family, `json` elsewhere |
+| integers | the same size, unsigned kept; SQLite integers (64 bits) become `bigInteger` |
+| `decimal(p, s)` | `decimal(p, s)` (at most 38 digits on MatrixOne); without precision (SQLite): `decimal(38, s)` with `s` from a `decimal:s` cast, else 10 |
+| `varchar(n)`, `char(n)` | `string(n)`, `char(n)`; unbounded: `text`; SQLite keeps no length: `string(255)`; over 16,000 characters on the MySQL family: `text` |
+| `text` | `text` (`longText` on MySQL when the owner is another database) |
+| `timestamp`, `timestamptz`, `datetime` | `timestamp` / `timestampTz` on the PostgreSQL family, `dateTime` on the MySQL family (no 2038 limit) and SQLite; precision kept |
+| `date`, `time`, `uuid`, `inet`, binary | the same |
+| `enum`, `set` | `string(255)` |
+| an `encrypted` cast | `text` |
+| other types (geometry, vectors, intervals) | not mapped: declare them in `mirrorSchema()` |
 
 ### mirror:data
 
 ```bash
-php artisan db-portable:mirror:data analytics                  # backfill every mirrored model
-php artisan db-portable:mirror:data analytics --model='App\Models\Order' --since='-1 hour'
-php artisan db-portable:mirror:data analytics --queue          # spread the batches over queue workers
-php artisan db-portable:mirror:data analytics --prune          # also remove mirror rows gone from the owner
+php artisan db-portable:mirror:data analytics                  # write every owner row
+php artisan db-portable:mirror:data analytics --model=Order --since='-1 hour'
+php artisan db-portable:mirror:data analytics --queue          # queue the batches for the workers
+php artisan db-portable:mirror:data analytics --prune          # also delete the mirror rows gone from the owner
+php artisan db-portable:mirror:data analytics --dry-run        # count the rows
 ```
 
-Reads the owner in key order (batches of `--chunk=500`) and writes through the mirror writer, with the same value
-conversions and version guard as the queue.
+- Reads the owner rows through the mirror model's `ownerQuery()` in key order (`--chunk=500`), and writes them as the
+  jobs do: the same values, the rows `shouldMirror()` leaves out deleted, and the version guard. An equal version
+  overwrites, so rows changed without touching `updated_at` (`DB::table()->update()`) are repaired.
+- `--since` selects the rows by `updated_at`. `--queue` dispatches the batches as jobs (for mirrors turned on).
+- `--prune` deletes the mirror rows whose owner row is gone, or that `ownerQuery()` leaves out.
 
 ### mirror:stats
 
 ```bash
 php artisan db-portable:mirror:stats analytics                 # server statistics of both sides
-php artisan db-portable:mirror:stats analytics --compare       # plus exact aggregates of what both share
-php artisan db-portable:mirror:stats analytics --keys          # plus the key ranges and keys that differ
+php artisan db-portable:mirror:stats analytics --compare       # plus exact aggregates of the columns both have
+php artisan db-portable:mirror:stats analytics --keys          # plus the keys that differ
+php artisan db-portable:mirror:stats analytics --json          # the report as JSON
 ```
 
 The owner table and the mirror table are two tables on two servers. `mirror:stats` first shows what each server
@@ -391,29 +427,38 @@ knows about its table, without scanning it, as fresh as that server keeps it:
 
 | Server | Statistics shown |
 |---|---|
-| PostgreSQL | estimated rows (`pg_class.reltuples`), size, live and dead rows, last analyze, per-column null fraction and distinct values (`pg_stats`) |
-| MySQL / MariaDB | estimated rows, data and index size, index cardinality |
-| CockroachDB | per-column rows, distinct values and nulls (`SHOW STATISTICS`), estimated rows |
-| MatrixOne | rows and size (`mo_table_rows()`, `mo_table_size()`, refreshed asynchronously), rows and nulls of flushed data (`metadata_scan()`) |
-| XTDB | none: rows are counted |
-| SQLite | `sqlite_stat1`, after `ANALYZE` |
+| PostgreSQL | estimated rows (`pg_class.reltuples`; "not analyzed" before the first `ANALYZE`), size, live and dead rows, last analyze, per-column nulls and distinct values (`pg_stats`) |
+| MySQL / MariaDB | estimated rows, data and index size, last update, index cardinality |
+| CockroachDB | estimated rows and per-column nulls and distinct values (`SHOW STATISTICS`) |
+| MatrixOne | rows and size (`mo_table_rows()`, `mo_table_size()`: refreshed asynchronously, 0 right after writes), rows of flushed data (`metadata_scan()`) |
+| XTDB | none |
+| SQLite | estimated rows (`sqlite_stat1`, after `ANALYZE`) |
 
-With `--compare`, it runs one aggregate query per side over what both tables share: `count(*)`, and for the key and
-each column present on both sides, null counts, `min` / `max`, and `sum` of numeric columns; `max(updated_at)` gives
-the lag. With `--keys`, it counts rows per key range on both sides and lists the missing and extra keys of the ranges
-that differ.
+It also shows the mirror's queue (jobs waiting, failed jobs of this model and mirror), relations of the mirror model
+whose mirror table is missing or empty, and, for mirrors without `fromOwner()`, the columns on one side only.
+
+- `--compare` runs one aggregate query per side over the owner rows of `ownerQuery()` and the mirror table: `count(*)`,
+  and for each column both have, the null count, `min` / `max` / `sum` of numbers, `min` / `max` of dates, the true
+  count of booleans and the total length of strings; `max(updated_at)` gives the lag. Numbers and dates are compared
+  as values (`10.50` = `10.5`, the same instant).
+- `--keys` counts the rows of 20 key ranges on both sides and lists the missing and extra keys of the ranges that
+  differ; a key that is not an integer is compared key by key, up to 100,000 rows.
+- The command fails when the two sides differ, for scripts and alerts.
 
 ```
-Order → analytics (matrixone)          owner (pgsql)          mirror (matrixone)
-server: rows                           ~1,204,330             1,198,020 (async)
-server: size                           212 MB                 88 MB
-count(*)                               1,204,512              1,204,498             ≠ 14
-id min / max                           1 / 1,204,640          1 / 1,204,640
-status nulls                           0                      0
-total sum                              98,120,331.50          98,119,870.00         ≠
-updated_at max                         2026-09-29 10:15:02    2026-09-29 10:14:58   lag 4 s
-queue                                  3 pending, 0 failed
-relations                              items → Analytics\OrderItem: table missing
+Order → analytics
++-----------------------------+-----------------------+-----------------------------------------+-----------+
+|                             | owner (pgsql)         | mirror (matrixone)                      |           |
++-----------------------------+-----------------------+-----------------------------------------+-----------+
+| table                       | orders                | orders                                  |           |
+| server: rows                | ~1,204,330            | 1,198,020 (refreshed asynchronously)    |           |
+| server: size                | 212 MB                | 88 MB (refreshed asynchronously)        |           |
+| queue                       |                       | 3 pending on [mirrors], 0 failed        |           |
+| count(*)                    | 1204512               | 1204498                                 | ≠ 14      |
+| total sum                   | 98120331.5            | 98119870                                | ≠         |
+| updated_at max              | 2026-09-29 10:15:02   | 2026-09-29 10:14:58                     | ≠ lag 4 s |
+| keys missing on the mirror  |                       | 14: 1204627, 1204628, ...               | ≠         |
++-----------------------------+-----------------------+-----------------------------------------+-----------+
 ```
 
 `mirror:data` fixes missing or stale rows, `mirror:data --prune` extra ones.
@@ -422,7 +467,7 @@ relations                              items → Analytics\OrderItem: table miss
 
 ```bash
 php artisan db-portable:mirror:sync analytics    # schema, then data, then stats: a new mirror, or after a deployment
-php artisan db-portable:mirror:flush analytics   # empty the mirror tables (ERASE on XTDB)
+php artisan db-portable:mirror:flush analytics   # empty the mirror tables (asks first in production; --force does not)
 ```
 
 ## Recipes
@@ -473,7 +518,7 @@ empty mirror model per table (`class Order extends MirrorModel {}` in `App\Model
 
 ### Moving to another database without downtime
 
-Mirror everything to the new database, check that the two sides match (`mirror:stats --compare --keys`, coming), then
+Mirror everything to the new database, check that the two sides match (`mirror:stats --compare --keys`), then
 make the new database the owner (the connection of the models) and, for a while, mirror back to the old one.
 
 ## Limits
@@ -483,8 +528,9 @@ make the new database the owner (the connection of the models) and, for a while,
 - Mirrors are eventually consistent: a read right after a write may not see it yet.
 - `whereHas()` and joins between a mirror and the owner are not possible (two databases): copy the fields you need
   with `fromOwner()`, or mirror the related tables.
-- Mirror tables have no foreign keys, and owner schema changes need the mirror tables altered too (`mirror:schema`,
-  coming).
+- Mirror tables have no foreign keys, and owner schema changes need `mirror:schema` (in the deployment, after the
+  migrations); it adds columns and indexes but never drops or changes a column.
+- Binary columns are copied as they are read: a PostgreSQL `bytea` mirror may reject bytes from another database.
 - The queue engine needs a cache store with locks (Laravel's default stores have them): jobs are unique per row while
   they wait, and two jobs of one row do not run at once.
 - XTDB mirrors depend on laravel-xtdb2 and XTDB 2.2, both pre-releases.

@@ -2,6 +2,8 @@
 
 namespace DbPortable\Mirror;
 
+use DateTimeInterface;
+use DbPortable\Mirror\Attributes\MirroredAs;
 use DbPortable\Mirror\Jobs\MirrorKeys;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Bus\Dispatcher;
@@ -54,14 +56,15 @@ class MirrorSync
      * from the mirrors (unmirrorable()), in jobs of $chunk keys.
      *
      * @param  Builder<Model>  $query
+     * @param  string|null  $only  one of the model's mirrors (default: every mirror)
      */
-    public function queue(Builder $query, bool $remove = false, ?int $chunk = null): void
+    public function queue(Builder $query, bool $remove = false, ?int $chunk = null, ?string $only = null): void
     {
         $model = $query->getModel();
         $configs = [];
 
         foreach (array_keys($this->registry->mirrorsOf($model)) as $mirror) {
-            if (($config = $this->registry->active($mirror, $model::class)) !== null) {
+            if (($only === null || $mirror === $only) && ($config = $this->registry->active($mirror, $model::class)) !== null) {
                 $configs[$mirror] = $config;
             }
         }
@@ -96,8 +99,7 @@ class MirrorSync
      */
     public function sync(string $mirror, string $owner, array $keys, string $action = MirrorKeys::SYNC): void
     {
-        $declaration = $this->registry->mirrorsOf($owner)[$mirror]
-            ?? throw new LogicException("{$owner} is not mirrored in [{$mirror}].");
+        $declaration = $this->declaration($mirror, $owner);
 
         // Turned off since the job was queued.
         if ($this->registry->active($mirror, $owner) === null) {
@@ -165,7 +167,117 @@ class MirrorSync
     }
 
     /**
-     * The owner rows of $keys, soft-deleted ones included, through the mirror model's ownerQuery().
+     * Write the owner rows (those changed since $since) to a mirror in key order, as the
+     * jobs do: the rows shouldMirror() leaves out are deleted from the mirror.
+     *
+     * @param  class-string<Model>  $owner
+     * @param  (callable(int, int): void)|null  $progress  called after each chunk with the rows written and deleted so far
+     * @return array{written: int, deleted: int}
+     */
+    public function backfill(string $mirror, string $owner, ?DateTimeInterface $since = null, int $chunk = 500, ?callable $progress = null): array
+    {
+        $mirrorModel = $this->declaration($mirror, $owner)->model;
+        $this->registry->check($mirror);
+        $table = MirrorTable::of($mirrorModel);
+        /** @var Model $model */
+        $model = new $owner;
+        $written = $deleted = 0;
+
+        $this->ownerQuery($mirrorModel, $owner, $since)->chunkById(
+            $chunk,
+            function (Collection $models) use ($mirror, $mirrorModel, $table, $progress, &$written, &$deleted) {
+                $rows = $gone = [];
+
+                foreach ($models as $owned) {
+                    if ($this->shouldMirror($owned, $mirror)) {
+                        $rows[] = $this->row($mirror, $mirrorModel, $owned, $table);
+                    } else {
+                        $gone[] = $owned->getKey();
+                    }
+                }
+
+                $written += $this->writer->upsert($table, $rows);
+                $deleted += $this->writer->delete($table, $gone);
+
+                if ($progress !== null) {
+                    $progress($written, $deleted);
+                }
+            },
+            $model->getQualifiedKeyName(),
+            $model->getKeyName(),
+        );
+
+        return ['written' => $written, 'deleted' => $deleted];
+    }
+
+    /**
+     * Delete the mirror rows whose owner row is gone (or that ownerQuery() leaves out).
+     *
+     * @param  class-string<Model>  $owner
+     * @return int the rows deleted
+     */
+    public function prune(string $mirror, string $owner, int $chunk = 1000): int
+    {
+        $mirrorModel = $this->declaration($mirror, $owner)->model;
+        $table = MirrorTable::of($mirrorModel);
+        /** @var Model $model */
+        $model = new $owner;
+        $pruned = 0;
+
+        $table->connection->table($table->table)->select($table->key)->chunkById(
+            $chunk,
+            function ($rows) use ($mirrorModel, $owner, $model, $table, &$pruned) {
+                /** @var list<int|string> $keys */
+                $keys = $rows->pluck($table->key)->all();
+                $kept = array_flip($this->ownerQuery($mirrorModel, $owner)->whereKey($keys)->pluck($model->getKeyName())->map(fn ($key) => (string) $key)->all());
+
+                $pruned += $this->writer->delete($table, array_values(array_filter($keys, fn ($key) => ! isset($kept[(string) $key]))));
+            },
+            $table->key,
+        );
+
+        return $pruned;
+    }
+
+    /**
+     * Empty a mirror table.
+     *
+     * @param  class-string<Model>  $owner
+     */
+    public function flush(string $mirror, string $owner): void
+    {
+        $this->writer->flush(MirrorTable::of($this->declaration($mirror, $owner)->model));
+    }
+
+    /**
+     * The owner rows a mirror holds, through the mirror model's ownerQuery(): global scopes
+     * off (soft-deleted rows included), changed since $since.
+     *
+     * @param  class-string<MirrorModel>  $mirrorModel
+     * @param  class-string<Model>  $owner
+     * @return Builder<Model>
+     */
+    public function ownerQuery(string $mirrorModel, string $owner, ?DateTimeInterface $since = null): Builder
+    {
+        /** @var Model $model */
+        $model = new $owner;
+        $query = $mirrorModel::ownerQuery($model->newQueryWithoutScopes());
+
+        if ($since !== null) {
+            $column = $model->usesTimestamps() ? $model->getUpdatedAtColumn() : null;
+
+            if ($column === null) {
+                throw new LogicException("{$owner} has no updated_at column to select the rows changed since a time.");
+            }
+
+            $query->where($model->qualifyColumn($column), '>=', $since);
+        }
+
+        return $query;
+    }
+
+    /**
+     * The owner rows of $keys.
      *
      * @param  class-string<MirrorModel>  $mirrorModel
      * @param  class-string<Model>  $owner
@@ -174,10 +286,16 @@ class MirrorSync
      */
     protected function ownerRows(string $mirrorModel, string $owner, array $keys): Collection
     {
-        /** @var Model $model */
-        $model = new $owner;
+        return $this->ownerQuery($mirrorModel, $owner)->whereKey($keys)->get();
+    }
 
-        return $mirrorModel::ownerQuery($model->newQueryWithoutScopes())->whereKey($keys)->get();
+    /**
+     * @param  class-string<Model>  $owner
+     */
+    protected function declaration(string $mirror, string $owner): MirroredAs
+    {
+        return $this->registry->mirrorsOf($owner)[$mirror]
+            ?? throw new LogicException("{$owner} is not mirrored in [{$mirror}].");
     }
 
     protected function shouldMirror(Model $model, string $mirror): bool

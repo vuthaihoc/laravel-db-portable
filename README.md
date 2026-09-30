@@ -291,7 +291,7 @@ php artisan db-portable:audit --from=crdb --to=matrixone
 php artisan db-portable:audit --from=crdb --to=matrixone --table=videos --table=toeic_exam_user_logs
 ```
 
-It reports tables and columns missing from the target, integers outside the target column's range, and strings longer than the target `varchar(n)`. It runs one `min`/`max` query per table on the source.
+It reports tables and columns missing from the target, integers outside the target column's range, and strings longer than the target `varchar(n)`. It runs one `min`/`max` query per table on the source. Boolean source columns fit any integer column, and SQLite targets store 64-bit integers whatever the declared type, so neither is range-checked.
 
 ```
 | videos               | view_count | integer out of range | int (max 2147483647) but the source has 15950438052     |
@@ -330,8 +330,9 @@ class Order extends Model
 Analytics\Order::with('customer')->where('status', 'paid')->latest()->paginate(20);   // customers from the owner
 ```
 
-Implemented: owner and mirror models and the queue engine, on every pair of SQLite, PostgreSQL, MySQL, CockroachDB
-and MatrixOne. Coming: the `mirror:schema`, `mirror:data`, `mirror:stats` commands and XTDB history mirrors. See
+Implemented: owner and mirror models, the queue engine, and the `db-portable:mirror:schema`, `mirror:data`,
+`mirror:stats`, `mirror:sync`, `mirror:flush` commands, on every pair of SQLite, PostgreSQL, MySQL, CockroachDB and
+MatrixOne. Coming: XTDB history mirrors. See
 [docs/mirrors.md](docs/mirrors.md) for the API and [docs/plans/parallel-databases.md](docs/plans/parallel-databases.md)
 for the plan (sync engines, native change capture per database pair, phases).
 

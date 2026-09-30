@@ -78,6 +78,19 @@ class MirrorWriter
     }
 
     /**
+     * Empty the table.
+     */
+    public function flush(MirrorTable $table): void
+    {
+        $this->ensureSupported($table);
+
+        $query = $table->connection->table($table->table);
+
+        // Laravel's SQLite truncate also clears sqlite_sequence, which only autoincrement keys create.
+        Family::of($table->connection) === Family::SQLITE ? $query->delete() : $query->truncate();
+    }
+
+    /**
      * @param  non-empty-list<array<string, mixed>>  $rows  rows with the same columns, sorted by name
      */
     protected function upsertBatch(MirrorTable $table, array $rows): void

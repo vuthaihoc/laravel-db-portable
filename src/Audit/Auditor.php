@@ -3,6 +3,7 @@
 namespace DbPortable\Audit;
 
 use DbPortable\Dialects\Dialect;
+use Illuminate\Database\Query\Grammars\SQLiteGrammar;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -60,15 +61,26 @@ class Auditor
     }
 
     /**
+     * The values of a source table that a target table of another name would reject or cut
+     * (strings too long, integers out of range), for the columns both have.
+     *
      * @return list<array{table: string, column: string|null, problem: string, detail: string}>
      */
-    protected function auditTable(string $table): array
+    public function auditValues(string $sourceTable, string $targetTable): array
+    {
+        return $this->auditTable($sourceTable, $targetTable, false);
+    }
+
+    /**
+     * @return list<array{table: string, column: string|null, problem: string, detail: string}>
+     */
+    protected function auditTable(string $table, ?string $targetTable = null, bool $missingColumns = true): array
     {
         $problems = [];
         $sourceColumns = collect(Schema::connection($this->from)->getColumns($table))->keyBy('name');
-        $targetColumns = collect(Schema::connection($this->to)->getColumns($table))->keyBy('name');
+        $targetColumns = collect(Schema::connection($this->to)->getColumns($targetTable ?? $table))->keyBy('name');
 
-        foreach ($sourceColumns->keys()->diff($targetColumns->keys()) as $column) {
+        foreach ($missingColumns ? $sourceColumns->keys()->diff($targetColumns->keys()) : [] as $column) {
             $problems[] = $this->problem($table, (string) $column, 'missing column', "[{$this->to}].{$table} has no column {$column}; its data would be dropped");
         }
 
@@ -76,9 +88,14 @@ class Auditor
         $dialect = Dialect::for($source->query()->getGrammar());
         $selects = [];
         $checks = [];
+        // SQLite integers have 64 bits whatever the declared type, and no unsigned.
+        $integers = ! DB::connection($this->to)->getQueryGrammar() instanceof SQLiteGrammar;
 
         foreach ($targetColumns as $name => $column) {
-            if (! $sourceColumns->has($name)) {
+            $sourceColumn = $sourceColumns->get($name);
+
+            // Booleans fit every integer type, and PostgreSQL has no min() of a boolean.
+            if ($sourceColumn === null || in_array(strtolower((string) $sourceColumn['type_name']), ['bool', 'boolean'], true)) {
                 continue;
             }
 
@@ -86,13 +103,13 @@ class Auditor
             $type = strtolower((string) $column['type']);
             $wrapped = $source->getQueryGrammar()->wrap($name);
 
-            if (isset(self::INTEGER_RANGES[$typeName])) {
+            if ($integers && isset(self::INTEGER_RANGES[$typeName])) {
                 [$min, $max, $unsignedMax] = self::INTEGER_RANGES[$typeName];
                 $unsigned = str_contains($type, 'unsigned');
                 $checks[] = ['integer', $name, $unsigned ? 0 : $min, $unsigned ? $unsignedMax : $max, $type];
                 $selects[] = "min({$wrapped}) as ".$this->alias('min', $name);
                 $selects[] = "max({$wrapped}) as ".$this->alias('max', $name);
-            } elseif (str_contains($type, 'unsigned')) {
+            } elseif ($integers && str_contains($type, 'unsigned')) {
                 $checks[] = ['integer', $name, 0, null, $type];
                 $selects[] = "min({$wrapped}) as ".$this->alias('min', $name);
             } elseif (preg_match('/^(var)?char(acter)?( varying)?\((\d+)\)/', $type, $matches)) {

@@ -25,6 +25,6 @@ class Order extends MirrorModel
 
     public static function ownerQuery(Builder $query): Builder
     {
-        return $query->with('customer');
+        return $query->with('customer')->where('status', '!=', 'draft');
     }
 }
