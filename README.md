@@ -369,7 +369,7 @@ Analytics\Order::with('customer')->where('status', 'paid')->latest()->paginate(2
 Implemented: owner and mirror models, the queue engine, and the `db-portable:mirror:schema`, `mirror:data`,
 `mirror:stats`, `mirror:sync`, `mirror:flush` commands, on every pair of SQLite, PostgreSQL, MySQL, CockroachDB and
 MatrixOne. Coming: XTDB history mirrors. See
-[docs/mirrors.md](docs/mirrors.md) for the API and [docs/plans/parallel-databases.md](docs/plans/parallel-databases.md)
+[docs/docs/mirrors.md](docs/docs/mirrors.md) for the API and [docs/plans/parallel-databases.md](docs/plans/parallel-databases.md)
 for the plan (sync engines, native change capture per database pair, phases).
 
 ## Testing

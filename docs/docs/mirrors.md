@@ -1,6 +1,6 @@
 # Mirrors: several databases in parallel
 
-> **Status: Phase 1 of [the plan](/plans/parallel-databases), in progress.** Implemented: owner models
+> **Status: Phase 1 of [the plan](../plans/parallel-databases.md), in progress.** Implemented: owner models
 > (`#[MirroredAs]`, `Mirrored`), mirror models, the queue engine with `'versions' => 'latest'`, and the `mirror:*`
 > commands, tested on every pair of the conformance databases (SQLite, PostgreSQL, MySQL, CockroachDB, MatrixOne).
 > Coming next: XTDB history mirrors (`'versions' => 'all'`). Names may still change before the release.
@@ -215,6 +215,8 @@ class Order extends MirrorModel
 - Writing a mirror model throws `MirrorIsReadOnly`: `save()`, `update()`, `delete()`, `create()`, `increment()`,
   and the query builder's `insert()`, `update()`, `upsert()`, `delete()`, `truncate()`... Only the mirror writer
   changes mirror tables (it writes through the connection, as `toBase()` or `DB::connection()` would).
+- The connection is its mirror's (`mirrors.<name>.connection`); a `$connection` set on the mirror model overrides
+  it, as on any Eloquent model, for reads and writes alike.
 - The table, the key and its type follow the owner model; so do the casts, so a mirror model reads its columns as the
   owner does (override `ownerCasts()` to drop them).
 - `$mirrorOrder->ownerModel` is the owner row, read in the owner database; it is a relation, so
@@ -317,8 +319,11 @@ created / updated / deleted  ──after commit──▶  queue job      ──�
 - Jobs are dispatched after the transaction commits: a rolled-back change never reaches a mirror.
 - One job per row and mirror waits in the queue: while it waits, later changes of the row need no other job.
 - The worker reads the owner row when it runs (global scopes off, soft-deleted rows included, through the mirror
-  model's `ownerQuery()`) and writes it; a row gone from the owner, or for which `shouldMirror()` is false, is deleted
-  from the mirror. Two jobs of one row never run at once (a cache lock), so the last one writes the latest state.
+  model's `ownerQuery()`) and writes it; a row gone from the owner, left out by `ownerQuery()`, or for which
+  `shouldMirror()` is false, is deleted from the mirror.
+- Two jobs of a row's Eloquent changes never run at once (a cache lock), so the last one writes the latest state.
+  The batches of `mirrorable()` and `mirror:data --queue` take no lock: the version guard keeps them from replacing a
+  newer version.
 - Failed jobs retry with the queue's settings.
 
 ### Latest state or every version
@@ -361,8 +366,9 @@ php artisan db-portable:mirror:flush {mirror}     # empty the mirror tables
 ```
 
 Every command works on the owner models mirrored in `{mirror}` (every mirror when left out), or on those of
-`--model=Order` (a class, or its basename; repeatable). A mirror missing from the configuration is skipped, and so is
-a mirror turned off unless `--force` is given.
+`--model=Order` (a class, or its basename; repeatable). A mirror missing from the configuration is skipped. A mirror
+turned off is skipped by `mirror:schema`, `mirror:data` and `mirror:sync` unless `--force` is given; `mirror:stats`
+shows it, marked as turned off, and `mirror:flush` empties it.
 
 ### mirror:schema
 
@@ -372,10 +378,10 @@ php artisan db-portable:mirror:schema analytics --migration    # write a migrati
 php artisan db-portable:mirror:schema analytics                # create or complete the mirror tables
 ```
 
-- The columns are those of the rows written to the mirror: the owner table's, or, with `fromOwner()` or
-  `toMirrorArray()`, those of the row made for the first owner row. Each is mapped from the owner column to the
-  mirror's database (below); a column `fromOwner()` computes gets a type from its sample value. The mirror model's
-  `mirrorSchema()` comes on top, and the columns it declares win.
+- The columns are those of the rows written to the mirror: those of the row made (by `fromOwner()` or
+  `toMirrorArray()`) for the first owner row, or the owner table's when it has no row. Each is mapped from the owner
+  column to the mirror's database (below); a column `fromOwner()` computes gets a type from its sample value, and is
+  reported. The mirror model's `mirrorSchema()` comes on top, and the columns it declares win.
 - The key is the primary key, never auto-incrementing; every other column is nullable (the owner enforces its
   constraints). No foreign keys, and no owner indexes: `mirrorSchema()` adds the indexes the mirror needs.
 - On an existing table, the missing columns and the `mirrorSchema()` indexes it lacks (by name) are added; a column is
@@ -389,13 +395,13 @@ php artisan db-portable:mirror:schema analytics                # create or compl
 | JSON: `json`, `jsonb`, or an `array` / `json` / `object` / `collection` cast (SQLite stores JSON as `text`) | `jsonb` on the PostgreSQL family, `json` elsewhere |
 | integers | the same size, unsigned kept; SQLite integers (64 bits) become `bigInteger` |
 | `decimal(p, s)` | `decimal(p, s)` (at most 38 digits on MatrixOne); without precision (SQLite): `decimal(38, s)` with `s` from a `decimal:s` cast, else 10 |
-| `varchar(n)`, `char(n)` | `string(n)`, `char(n)`; unbounded: `text`; SQLite keeps no length: `string(255)`; over 16,000 characters on the MySQL family: `text` |
-| `text` | `text` (`longText` on MySQL when the owner is another database) |
+| `varchar(n)`, `char(n)` | `string(n)`, `char(n)` (`string(n)` over 255); unbounded: `text`; SQLite keeps no length: `string(255)`; over 16,000 characters on the MySQL family: `text` |
+| `text`, `mediumtext`, `longtext` | the same (`text` becomes `longText` on MySQL when the owner is another database) |
 | `timestamp`, `timestamptz`, `datetime` | `timestamp` / `timestampTz` on the PostgreSQL family, `dateTime` on the MySQL family (no 2038 limit) and SQLite; precision kept |
-| `date`, `time`, `uuid`, `inet`, binary | the same |
+| `date`, `time`, `year`, `uuid`, `inet`, `macaddr`, binary | the same (`cidr`: `string(43)`) |
 | `enum`, `set` | `string(255)` |
 | an `encrypted` cast | `text` |
-| other types (geometry, vectors, intervals) | not mapped: declare them in `mirrorSchema()` |
+| other types (geometry, vectors, intervals) | from the cast when it tells (`integer`, `float`, `decimal:s`, `datetime`, `date`, `string`), else not mapped: declare them in `mirrorSchema()` |
 
 ### mirror:data
 
