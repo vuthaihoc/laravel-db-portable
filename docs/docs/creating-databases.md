@@ -11,9 +11,28 @@ php artisan db:create matrixone --admin-user=root --user=reporting --privileges=
 
 # Print the statements without running them (the password is masked)
 php artisan db:create pgsql --user=app --pretend
+
+# No connection: a server given by its driver and settings
+php artisan db:create --driver=crdb -o host=1.1.1.1 -o port=9876 --database=shop --admin-user=root
 ```
 
+`php artisan db:create -h` lists the options and these examples.
+
 ---
+
+## Which server
+
+- `connection` (argument): a connection of `config/database.php`; default: the default connection.
+- `--driver` without a connection: a server given by its driver (`pgsql`, `crdb`, `mysql`, `mariadb`, `matrixone`, `sqlite`) and its settings. The driver's defaults fill the rest: `127.0.0.1`, the driver's port (5432, 26257, 3306, 6001), `sslmode=prefer` on the PostgreSQL family, `utf8mb4_unicode_ci` on the MySQL family. No user is assumed: give `-o username=... -o password=...`, `--admin-user`, or answer the question.
+- `-o key=value` (`--option`, repeatable): a setting replacing the connection's, or the driver's defaults: `host`, `port`, `username`, `password`, `database`, `sslmode`, `charset`... With a connection, `--driver` replaces its driver too.
+
+```bash
+php artisan db:create mysql -o host=10.0.0.5 -o port=3307 --database=shop   # the mysql connection, another server
+php artisan db:create --driver=pgsql -o host=db.internal -o username=postgres --database=shop
+php artisan db:create --driver=sqlite -o database=/var/data/shop.sqlite
+```
+
+The connection's own configuration is not changed: the settings only apply to the command. A password given with `-o` stays in the shell history; leave it out to be asked for it (hidden).
 
 ## Who creates the database
 

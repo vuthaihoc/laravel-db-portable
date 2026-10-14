@@ -20,7 +20,9 @@ class CreateDatabaseCommand extends Command
 {
     /** @var string */
     protected $signature = 'db-portable:db:create
-        {connection? : The connection whose database to create (default: the default connection)}
+        {connection? : The connection whose database to create (default: the default connection, unless --driver is given)}
+        {--driver= : Without a connection: the driver of the server (pgsql, crdb, mysql, mariadb, matrixone, sqlite); with one: replaces its driver}
+        {--o|option=* : A connection setting as key=value, repeatable (host, port, username, password, sslmode...); replaces the connection\'s}
         {--database= : The database name (default: the connection\'s)}
         {--admin-user= : A user allowed to create databases and users (default: the connection\'s user; asked when refused)}
         {--admin-password= : The admin\'s password (asked when --admin-user is given without it)}
@@ -48,6 +50,32 @@ class CreateDatabaseCommand extends Command
     /** @var list<string> */
     protected $aliases = ['db:create'];
 
+    /** @var string */
+    protected $help = <<<'HELP'
+        Creates the database of a connection and, optionally, a user limited to it. Runs as --admin-user,
+        else as the connection's user; while the server refuses it, asks for an admin user and password.
+
+        <comment>Examples:</comment>
+
+          <info>php artisan db:create</info>
+              The default connection's database, for its user (an admin is asked for when needed).
+
+          <info>php artisan db:create pgsql --user=app --privileges=readwrite</info>
+              The pgsql connection's database, with a user allowed to read and write rows.
+
+          <info>php artisan db:create mysql -o host=10.0.0.5 -o port=3307 --database=shop</info>
+              The mysql connection's settings, another server and database.
+
+          <info>php artisan db:create --driver=crdb -o host=1.1.1.1 -o port=9876 --database=shop --admin-user=root</info>
+              No connection: a CockroachDB server given by its settings.
+
+          <info>php artisan db:create matrixone --admin-user=root --user=reporting --privileges=readonly --no-interaction</info>
+              Without questions: the reporting user's password is generated and printed once.
+
+          <info>php artisan db:create pgsql --user=app --require-ssl --connection-limit=20 --password-days=90 --pretend</info>
+              Print the statements (passwords masked) without running them.
+        HELP;
+
     /** Admins tried before giving up. */
     private const ATTEMPTS = 3;
 
@@ -58,7 +86,7 @@ class CreateDatabaseCommand extends Command
         $creator = null;
 
         try {
-            $creator = new Creator($this->connectionName());
+            $creator = new Creator($this->connectionName(), $this->settings());
             $database = $this->string('database') ?? $creator->database()
                 ?? ($this->interactive() ? $this->string(null, $this->ask('Database name')) : null);
 
@@ -350,11 +378,42 @@ class CreateDatabaseCommand extends Command
         return $this->input->isInteractive();
     }
 
-    private function connectionName(): string
+    /**
+     * The connection argument, else the default connection unless --driver names a server.
+     */
+    private function connectionName(): ?string
     {
         $name = $this->argument('connection');
 
-        return is_string($name) && $name !== '' ? $name : (string) config('database.default');
+        if (is_string($name) && $name !== '') {
+            return $name;
+        }
+
+        return $this->string('driver') === null ? (string) config('database.default') : null;
+    }
+
+    /**
+     * The settings given by --driver and -o key=value.
+     *
+     * @return array<string, mixed>
+     */
+    private function settings(): array
+    {
+        $settings = [];
+
+        foreach ((array) $this->option('option') as $option) {
+            if (! is_string($option) || ! preg_match('/^\s*([A-Za-z0-9_]+)\s*=(.*)$/s', $option, $match)) {
+                throw new InvalidArgumentException('-o takes key=value: ['.(is_string($option) ? $option : '').'].');
+            }
+
+            $settings[$match[1]] = $match[2];
+        }
+
+        if (($driver = $this->string('driver')) !== null) {
+            $settings['driver'] = $driver;
+        }
+
+        return $settings;
     }
 
     /**

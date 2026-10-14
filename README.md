@@ -309,7 +309,10 @@ A suggested workflow, e.g. from CockroachDB (`crdb`) to MatrixOne (`matrixone`):
 php artisan db:create                       # the default connection's database, as its user
 php artisan db:create matrixone --admin-user=root --user=reporting --privileges=readonly
 php artisan db:create pgsql --user=app --pretend   # print the statements (passwords masked)
+php artisan db:create --driver=crdb -o host=1.1.1.1 -o port=9876 --database=shop --admin-user=root   # no connection
 ```
+
+- The server: a connection, else `--driver` with its settings as `-o key=value` (host, port, username, password, sslmode...); with a connection, `-o` replaces its settings for the command. `db:create -h` shows examples.
 
 - Runs as `--admin-user`, else as the connection's user; when the server refuses it, asks for an admin user and password (hidden). The connection's user then gets the database, so the application connects with its `.env` credentials.
 - The user: `--user`, else the connection's user (asked). A new user's password is `--password`, the connection's password for the connection's user, else asked (empty: generated, printed once as `.env` lines). An existing user keeps its password.

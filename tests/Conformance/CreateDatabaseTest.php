@@ -3,6 +3,7 @@
 namespace DbPortable\Tests\Conformance;
 
 use DbPortable\Tests\TestCase;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -137,6 +138,38 @@ class CreateDatabaseTest extends TestCase
         $this->assertFalse($this->databaseExists($connection));
     }
 
+    #[DataProvider('servers')]
+    public function test_a_driver_and_its_settings_stand_for_a_connection(string $connection): void
+    {
+        $this->prepare($connection);
+        $config = config("database.connections.{$connection}");
+        $settings = ['host='.$config['host'], 'port='.$config['port'], 'username='.$config['username'], 'password='.$config['password']];
+
+        if (isset($config['sslmode'])) {
+            $settings[] = 'sslmode='.$config['sslmode'];
+        }
+
+        $this->artisan('db-portable:db:create', [
+            '--driver' => $config['driver'], '-o' => $settings, '--database' => self::CREATED, '--no-user' => true, '--no-interaction' => true,
+        ])->expectsOutputToContain('is ready')->assertSuccessful();
+
+        $this->assertTrue($this->databaseExists($connection));
+    }
+
+    #[DataProvider('servers')]
+    public function test_settings_replace_the_connection_settings(string $connection): void
+    {
+        $this->prepare($connection);
+        $config = config("database.connections.{$connection}");
+        config(["database.connections.{$connection}_moved" => ['port' => 1, 'database' => self::CREATED] + $config]);
+
+        $this->artisan('db-portable:db:create', [
+            'connection' => "{$connection}_moved", '--option' => ['port='.$config['port']], '--no-user' => true, '--no-interaction' => true,
+        ])->expectsOutputToContain('is ready')->assertSuccessful();
+
+        $this->assertTrue($this->databaseExists($connection));
+    }
+
     public function test_creates_the_sqlite_file(): void
     {
         $path = sys_get_temp_dir().'/dbp-created-'.getmypid().'.sqlite';
@@ -152,9 +185,30 @@ class CreateDatabaseTest extends TestCase
             $this->artisan('db:create', ['connection' => 'sqlite_file', '--no-interaction' => true])
                 ->expectsOutputToContain('Nothing to create')
                 ->assertSuccessful();
+
+            // A driver and its settings, without a connection.
+            unlink($path);
+            $this->artisan('db:create', ['--driver' => 'sqlite', '-o' => ["database={$path}"], '--no-interaction' => true])
+                ->expectsOutputToContain('Created the SQLite database')
+                ->assertSuccessful();
+            $this->assertFileExists($path);
         } finally {
             @unlink($path);
         }
+    }
+
+    public function test_settings_are_key_value_pairs(): void
+    {
+        $this->artisan('db:create', ['--driver' => 'mysql', '-o' => ['host'], '--no-interaction' => true])
+            ->expectsOutputToContain('-o takes key=value')
+            ->assertFailed();
+    }
+
+    public function test_the_help_shows_examples(): void
+    {
+        $help = $this->app->make(Kernel::class)->all()['db-portable:db:create']->getHelp();
+
+        $this->assertStringContainsString('db:create --driver=crdb -o host=1.1.1.1 -o port=9876', $help);
     }
 
     private function prepare(string $connection): void
@@ -206,7 +260,7 @@ class CreateDatabaseTest extends TestCase
 
     private function dropCreated(string $connection): void
     {
-        foreach (['dbp_created_admin', 'dbp_created_dbp_app', $connection.'_app'] as $name) {
+        foreach (['dbp_created_admin', 'dbp_created_dbp_app', $connection.'_app', $connection.'_moved'] as $name) {
             DB::purge($name);
         }
 

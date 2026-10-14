@@ -26,6 +26,24 @@ final class Creator
 
     private const IN_DATABASE = 'db_portable_create_database';
 
+    /** An unknown driver is resolved under this name, to learn its family. */
+    private const TARGET = 'db_portable_create_target';
+
+    /**
+     * The settings of a connection given by its driver only (the user and password
+     * stay unset: the command asks for an admin).
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private const DEFAULTS = [
+        'pgsql' => ['host' => '127.0.0.1', 'port' => 5432, 'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer'],
+        'crdb' => ['host' => '127.0.0.1', 'port' => 26257, 'charset' => 'utf8', 'prefix' => '', 'schema' => 'public', 'sslmode' => 'prefer'],
+        'mysql' => ['host' => '127.0.0.1', 'port' => 3306, 'charset' => 'utf8mb4', 'collation' => 'utf8mb4_unicode_ci', 'prefix' => ''],
+        'mariadb' => ['host' => '127.0.0.1', 'port' => 3306, 'charset' => 'utf8mb4', 'collation' => 'utf8mb4_unicode_ci', 'prefix' => ''],
+        'matrixone' => ['host' => '127.0.0.1', 'port' => 6001, 'charset' => 'utf8mb4', 'collation' => 'utf8mb4_unicode_ci', 'prefix' => ''],
+        'sqlite' => ['prefix' => '', 'foreign_key_constraints' => true],
+    ];
+
     /** @var array<string, mixed> */
     private array $config;
 
@@ -36,18 +54,34 @@ final class Creator
     /** @var array{string, string|null}|null */
     private ?array $credentials = null;
 
-    public function __construct(private readonly string $connection)
+    /**
+     * @param  string|null  $connection  A configured connection; null: a connection made of $overrides, which then name the driver.
+     * @param  array<string, mixed>  $overrides  Settings replacing the connection's (host, port, driver...).
+     */
+    public function __construct(private readonly ?string $connection, array $overrides = [])
     {
-        $config = config("database.connections.{$connection}");
+        if ($connection === null) {
+            $driver = $overrides['driver'] ?? null;
 
-        if (! is_array($config)) {
-            throw new InvalidArgumentException("Database connection [{$connection}] not configured.");
+            if (! is_string($driver) || $driver === '') {
+                throw new InvalidArgumentException('Name a connection, or a driver (--driver) with its settings (-o host=...).');
+            }
+
+            $config = self::DEFAULTS[$driver] ?? ['prefix' => ''];
+        } else {
+            $config = config("database.connections.{$connection}");
+
+            if (! is_array($config)) {
+                throw new InvalidArgumentException("Database connection [{$connection}] not configured.");
+            }
+
+            // The url wins over the other keys; the write host is the primary.
+            $config = (new ConfigurationUrlParser)->parseConfiguration($config);
+            $write = is_array($config['write'] ?? null) ? $config['write'] : [];
+            $config = array_merge(Arr::except($config, ['url', 'read', 'write', 'sticky', 'connect_via_database']), $write);
         }
 
-        // The url wins over the other keys; the write host is the primary.
-        $config = (new ConfigurationUrlParser)->parseConfiguration($config);
-        $write = is_array($config['write'] ?? null) ? $config['write'] : [];
-        $config = array_merge(Arr::except($config, ['url', 'read', 'write', 'sticky', 'connect_via_database']), $write);
+        $config = array_merge($config, $overrides);
 
         if (is_array($config['host'] ?? null)) {
             $config['host'] = reset($config['host']);
@@ -60,8 +94,18 @@ final class Creator
             Family::SQLITE, Family::POSTGRES, Family::MYSQL => $config['driver'],
             'mariadb' => Family::MYSQL,
             Family::CRDB, Family::MATRIXONE => $config['driver'],
-            default => self::kind(DB::connection($connection)),
+            default => self::kind($this->target()),
         };
+    }
+
+    /**
+     * The drivers --driver knows the default settings of.
+     *
+     * @return list<string>
+     */
+    public static function drivers(): array
+    {
+        return array_keys(self::DEFAULTS);
     }
 
     /**
@@ -262,7 +306,17 @@ final class Creator
      */
     public function forgetConnection(): void
     {
-        DB::purge($this->connection);
+        if ($this->connection !== null) {
+            DB::purge($this->connection);
+        }
+    }
+
+    private function target(): Connection
+    {
+        config(['database.connections.'.self::TARGET => $this->config]);
+        DB::purge(self::TARGET);
+
+        return DB::connection(self::TARGET);
     }
 
     private function admin(): Connection
