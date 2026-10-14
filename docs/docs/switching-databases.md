@@ -55,9 +55,10 @@ php artisan db-portable:scan --json --fail
 
 ## Step 2: Migrate Target Database
 
-Run migrations against the target connection:
+Create the target database and its user if needed ([`db:create`](./creating-databases.md)), then run migrations against the target connection:
 
 ```bash
+php artisan db:create matrixone
 php artisan migrate --database=matrixone
 ```
 

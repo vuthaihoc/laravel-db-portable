@@ -4,6 +4,7 @@ namespace DbPortable;
 
 use DbPortable\Console\AuditCommand;
 use DbPortable\Console\CopyCommand;
+use DbPortable\Console\CreateDatabaseCommand;
 use DbPortable\Console\Mirror;
 use DbPortable\Console\ScanCommand;
 use DbPortable\Console\SearchIndexesCommand;
@@ -61,7 +62,7 @@ class DbPortableServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/db-portable.php' => config_path('db-portable.php')], 'db-portable-config');
             $this->commands([
-                ScanCommand::class, AuditCommand::class, CopyCommand::class, SearchIndexesCommand::class,
+                ScanCommand::class, AuditCommand::class, CopyCommand::class, SearchIndexesCommand::class, CreateDatabaseCommand::class,
                 Mirror\SchemaCommand::class, Mirror\DataCommand::class, Mirror\StatsCommand::class, Mirror\SyncCommand::class, Mirror\FlushCommand::class,
             ]);
         }

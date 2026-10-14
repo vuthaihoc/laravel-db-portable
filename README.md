@@ -1,7 +1,8 @@
 # Laravel DB Portable
 
-Query builder helpers that compile for **PostgreSQL / CockroachDB**, **MySQL / MariaDB / MatrixOne** and **SQLite**, plus three Artisan commands for switching an application from one database to another:
+Query builder helpers that compile for **PostgreSQL / CockroachDB**, **MySQL / MariaDB / MatrixOne** and **SQLite**, plus Artisan commands for switching an application from one database to another:
 
+- `db-portable:db:create` (`db:create`) creates a connection's database and a user limited to it;
 - `db-portable:scan` finds database-specific SQL in your code;
 - `db-portable:audit` checks that the data of one connection fits the schema of another;
 - `db-portable:copy` copies the rows.
@@ -297,10 +298,26 @@ php artisan db-portable:search-indexes --like                   # also the LIKE 
 A suggested workflow, e.g. from CockroachDB (`crdb`) to MatrixOne (`matrixone`):
 
 1. **Scan** the code for SQL the new database will reject, and rewrite it with the methods above.
-2. **Migrate** the new database: `php artisan migrate --database=matrixone`.
+2. **Create** and **migrate** the new database: `php artisan db:create matrixone`, then `php artisan migrate --database=matrixone`.
 3. **Audit** the data against the new schema, and widen the columns it reports.
 4. **Copy** the data.
 5. Point `DB_CONNECTION` at the new database and run your test suite.
+
+### Create the database
+
+```bash
+php artisan db:create                       # the default connection's database, as its user
+php artisan db:create matrixone --admin-user=root --user=reporting --privileges=readonly
+php artisan db:create pgsql --user=app --pretend   # print the statements (passwords masked)
+```
+
+- Runs as `--admin-user`, else as the connection's user; when the server refuses it, asks for an admin user and password (hidden). The connection's user then gets the database, so the application connects with its `.env` credentials.
+- The user: `--user`, else the connection's user (asked). A new user's password is `--password`, the connection's password for the connection's user, else asked (empty: generated, printed once as `.env` lines). An existing user keeps its password.
+- `--privileges=all|readwrite|readonly`: `all` owns the database (PostgreSQL family) or has every privilege on it; the other levels cover tables created later too (default privileges on the PostgreSQL family, a role on MatrixOne).
+- Security: the user cannot create databases or roles; PUBLIC loses access to a new PostgreSQL/CockroachDB database (`--public` keeps it); `--require-ssl`, `--connection-limit`, `--password-days`, `--user-host` where the server supports them, a warning elsewhere.
+- Prints the statements and asks before running them (`--force`); an existing database or user is kept, the grants are applied again. SQLite: creates the file.
+
+See [Creating Databases & Users](docs/docs/creating-databases.md).
 
 ### Scan
 

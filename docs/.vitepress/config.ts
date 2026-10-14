@@ -45,6 +45,7 @@ export default defineConfig({
       {
         text: 'Switching Databases',
         items: [
+          { text: 'Creating Databases & Users', link: '/docs/creating-databases' },
           { text: 'Scan, Audit & Copy', link: '/docs/switching-databases' },
         ],
       },
