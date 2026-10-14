@@ -73,10 +73,11 @@ The statements holding a password run on the PDO directly: query listeners (Tele
 | Level | PostgreSQL, CockroachDB | MySQL, MariaDB | MatrixOne (role `<database>_<level>`) |
 |---|---|---|---|
 | `all` (migrations included) | owns the new database | `all privileges on db.*` | `all` on the database and its tables |
-| `readwrite` (rows only) | `select, insert, update, delete` on tables, `usage, select, update` on sequences | `select, insert, update, delete, execute, create temporary tables, lock tables, show view` | `show tables`, `select, insert, update, delete` |
+| `readwrite` (rows only) | `select, insert, update, delete` on tables, `usage, select, update` on sequences; `temporary` on the database (PostgreSQL only) | `select, insert, update, delete, execute, create temporary tables, lock tables, show view` | `show tables`, `select, insert, update, delete` |
 | `readonly` | `select` on tables and sequences | `select, show view` | `show tables`, `select` |
 
 - **PostgreSQL family**: the grants cover the tables existing in the schema (`--schema`, default `public`) and, through `alter default privileges`, the tables the database owner creates later. The owner is `--owner`, else the user with `all`, else the admin: run the migrations as the owner.
+- **CockroachDB**: a `readwrite` user cannot create temporary tables: CockroachDB has no `TEMPORARY` privilege before v26, and its temporary tables are experimental. The command prints a warning when you choose it.
 - **MySQL family**: `db.*` covers the tables created later.
 - **MatrixOne** grants privileges to roles: the command creates the role (`--role` to name it), grants it, and makes it the new user's default role. An existing user is granted the role but keeps its default role: connect as `account:user:role`, or run `set secondary role all`.
 

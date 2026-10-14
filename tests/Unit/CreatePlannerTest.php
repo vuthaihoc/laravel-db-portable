@@ -134,6 +134,10 @@ class CreatePlannerTest extends TestCase
         ], $plan->server);
         $this->assertSame(['revoke create on schema public from public'], $plan->database);
         $this->assertCount(2, $plan->warnings);
+
+        $plan = $this->plan(Family::CRDB, new CreateOptions('shop', 'app', 'x', privileges: CreateOptions::READWRITE));
+        $this->assertContains('grant connect on database "shop" to "app"', $plan->server);
+        $this->assertStringContainsString('not create temporary tables', $plan->warnings[0]);
     }
 
     public function test_names_are_quoted_and_validated(): void

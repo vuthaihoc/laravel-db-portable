@@ -241,9 +241,14 @@ final class Planner
             $creator = $this->pgId($databaseOwner ?? $this->facts->currentUser);
             [$onDatabase, $tables, $sequences] = match ($o->privileges) {
                 CreateOptions::ALL => ['all privileges', 'all privileges', 'all privileges'],
-                CreateOptions::READWRITE => ['connect, temporary', 'select, insert, update, delete', 'usage, select, update'],
+                // CockroachDB 25 has no TEMPORARY privilege (its temporary tables are experimental anyway).
+                CreateOptions::READWRITE => [$crdb ? 'connect' : 'connect, temporary', 'select, insert, update, delete', 'usage, select, update'],
                 default => ['connect', 'select', 'select'],
             };
+
+            if ($crdb && $o->privileges === CreateOptions::READWRITE) {
+                $this->warnings[] = "CockroachDB: [{$user}] can connect to [{$o->database}] but not create temporary tables (no TEMPORARY privilege before CockroachDB 26; its temporary tables are experimental).";
+            }
 
             $server[] = "grant {$onDatabase} on database {$database} to {$role}";
             $inDatabase[] = 'grant '.($o->privileges === CreateOptions::ALL ? 'all privileges' : 'usage')." on schema {$schema} to {$role}";
